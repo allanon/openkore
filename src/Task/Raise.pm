@@ -83,7 +83,7 @@ sub init {
 	
 	delete $self->{expected};
 	
-	if (@{$self->{queue} = [$self->initQueue]}) {
+	if ($self->canRaise && @{$self->{queue} = [$self->initQueue]}) {
 		debug sprintf(__PACKAGE__."::init queue size: %d\n", scalar @{$self->{queue}}), __PACKAGE__, 2 if DEBUG;
 		$self->setState(UPGRADE);
 	} else {

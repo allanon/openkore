@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 5265 $
+#  $Id: Unix.pm 5265 2006-12-26 18:43:32Z vcl_kore $
 #
 #########################################################################
 ##

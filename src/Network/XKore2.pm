@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8785 $
+#  $Id: XKore2.pm 8785 2013-12-17 22:07:21Z marcelofoxes $
 #
 #########################################################################
 ##
@@ -141,7 +141,7 @@ sub clientSend {
 }
 
 sub clientRecv {
-	no encoding 'utf8';
+	no utf8;
 	use bytes;
 	my (undef, $args) = @_;
 

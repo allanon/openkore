@@ -1,8 +1,11 @@
 package AI::Slave;
 
 use strict;
-use Time::HiRes qw(time);
+
 use base qw/Actor::Slave/;
+
+use Modules 'register';
+use Time::HiRes qw(time);
 use Globals;
 use Log qw/message warning error debug/;
 use Utils;
@@ -128,125 +131,165 @@ sub is {
 	return 0;
 }
 
+sub processFollow {
+    my ( $slave ) = @_;
+
+    my $slave_dist = blockDistance( $slave->position, $char->position );
+
+    # auto-follow
+    if (
+        $slave->{slave_AI} == AI::AUTO
+        && (AI::action eq "move" || AI::action eq "route")
+        && !$char->{sitting}
+        && !AI::args->{mapChanged}
+# ETHAN: TODO: fix this code; the double negative is probably wrong
+#        && !AI::args->{time_move} != $char->{time_move}
+        && !timeOut(AI::args->{ai_move_giveup})
+        && $slave_dist < MAX_DISTANCE
+        && ($slave->isIdle
+            || blockDistance(AI::args->{move_to}, $slave->{pos_to}) >= MAX_DISTANCE)
+        && (!defined $slave->findAction('route') || !$slave->args($slave->findAction('route'))->{follow_route})
+    ) {
+        $slave->clear('move', 'route');
+        if (!checkLineWalkable($slave->{pos_to}, $char->{pos_to})) {
+            $slave->route(undef, @{$char->{pos_to}}{qw(x y)});
+            $slave->args->{follow_route} = 1 if $slave->action eq 'route';
+            debug sprintf("Slave follow route (distance: %.2f)\n", $slave->distance()), 'homunculus';
+
+        } elsif (timeOut($slave->{move_retry}, 0.5)) {
+            # No update yet, send move request again.
+            # We do this every 0.5 secs
+            $slave->{move_retry} = time;
+            # NOTE:
+            # The default LUA uses sendHomunculusStandBy() for the follow AI
+            # however, the server-side routing is very inefficient
+            # (e.g. can't route properly around obstacles and corners)
+            # so we make use of the sendHomunculusMove() to make up for a more efficient routing
+            $slave->sendMove ($char->{pos_to}{x}, $char->{pos_to}{y});
+            debug sprintf("Slave follow move (distance: %.2f)\n", $slave->distance()), 'homunculus';
+        }
+        return 1;
+    }
+
+    # homunculus is found
+    if ($slave->{slave_lost}) {
+        if ($slave_dist < MAX_DISTANCE) {
+            delete $slave->{slave_lost};
+            delete $slave->{lostRoute};
+            my $action = $slave->findAction('route');
+            if (defined $action && $slave->args($action)->{lost_route}) {
+                for (my $i = 0; $i <= $action; $i++) {
+                    $slave->dequeue
+                }
+            }
+            if (timeOut($slave->{standby_time}, 1)) {
+                $slave->sendStandBy;
+                $slave->{standby_time} = time;
+            }
+            message TF("Found %s!\n", $slave), 'homunculus';
+
+        # attempt to find homunculus on it's last known coordinates
+        } elsif ($AI == AI::AUTO && !$slave->{lostRoute}) {
+            if ($config{homunculus_StandByAuto}) {
+                message TF("Stand By Homun\n", $slave), 'teleport';
+                $slave->sendStandBy;
+            } elsif ($config{teleportAuto_lostHomunculus}) {
+                message TF("Teleporting to get %s back\n", $slave), 'teleport';
+                useTeleport(1);
+            } elsif ($config{homunculus_findLost}) {
+                my $x = $slave->{pos_to}{x};
+                my $y = $slave->{pos_to}{y};
+                my $distFromGoal = $config{$slave->{configPrefix}.'followDistanceMax'};
+                $distFromGoal = MAX_DISTANCE if ($distFromGoal > MAX_DISTANCE);
+                main::ai_route($field->baseName, $x, $y, distFromGoal => $distFromGoal, attackOnRoute => 1, noSitAuto => 1);
+                $slave->args->{lost_route} = 1 if $slave->action eq 'route';
+                message TF("Trying to find %s at location %d, %d (you are currently at %d, %d)\n", $slave, $x, $y, $char->{pos_to}{x}, $char->{pos_to}{y}), 'homunculus';
+            }
+            $slave->{lostRoute} = 1;
+        }
+        return 1;
+    }
+
+    # homunculus is lost
+    if ($slave->{actorType} eq 'Homunculus' && $slave_dist >= MAX_DISTANCE && !$slave->{slave_lost}) {
+        $slave->{slave_lost} = 1;
+        message TF("You lost %s!\n", $slave), 'homunculus';
+        return 1;
+    }
+
+    return 0;
+}
+
+sub processIdle {
+    my ( $slave ) = @_;
+
+    my $slave_dist = blockDistance( $slave->position, $char->position );
+
+    # if your homunculus is idle, make it move near you
+    if (
+        $slave->{slave_AI} == AI::AUTO
+        && $slave->isIdle
+        && $slave_dist > ($config{$slave->{configPrefix}.'followDistanceMax'} || 3)
+        && $slave_dist < MAX_DISTANCE
+    ) {
+        my $params = { slave => $slave };
+        Plugins::callHook( 'homunculus_processIdle', $params );
+        if ( timeOut( $slave->{standby_time}, 2 ) ) {
+            return 1 if $params->{done};
+            $slave->sendStandBy;
+            $slave->{standby_time} = time;
+            debug sprintf( "Slave standby (distance: %.2f)\n", $slave->distance() ), 'homunculus';
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+sub processMasterIdle {
+    my ( $slave ) = @_;
+return 0;
+
+    my $slave_dist = blockDistance( $slave->position, $char->position );
+
+    # if you are idle, move near the homunculus
+    if (
+        $slave->{actorType} eq 'Homunculus' &&
+        $AI == AI::AUTO && AI::isIdle && !$slave->isIdle
+        && $config{$slave->{configPrefix}.'followDistanceMax'}
+        && $slave_dist > $config{$slave->{configPrefix}.'followDistanceMax'}
+    ) {
+        main::ai_route($field->baseName, $slave->{pos_to}{x}, $slave->{pos_to}{y}, distFromGoal => ($config{$slave->{configPrefix}.'followDistanceMin'} || 3), attackOnRoute => 1, noSitAuto => 1);
+        message TF("%s moves too far (distance: %.2f) - Moving near\n", $slave, $slave->distance), 'homunculus';
+        return 1;
+    }
+    return 0;
+}
+
 sub iterate {
 	my $slave = shift;
+
+    return if !$slave->{appear_time};
+    return if $field->baseName ne $slave->{map};
 	
-	if ($slave->{appear_time} && $field->baseName eq $slave->{map}) {
-		my $slave_dist = blockDistance ($slave->position, $char->position);
-		
-		# auto-follow
-		if (
-			$slave->{slave_AI} == AI::AUTO
-			&& (AI::action eq "move" || AI::action eq "route")
-			&& !$char->{sitting}
-			&& !AI::args->{mapChanged}
-			&& !AI::args->{time_move} != $char->{time_move}
-			&& !timeOut(AI::args->{ai_move_giveup})
-			&& $slave_dist < MAX_DISTANCE
-			&& ($slave->isIdle
-				|| blockDistance(AI::args->{move_to}, $slave->{pos_to}) >= MAX_DISTANCE)
-			&& (!defined $slave->findAction('route') || !$slave->args($slave->findAction('route'))->{follow_route})
-		) {
-			$slave->clear('move', 'route');
-			if (!checkLineWalkable($slave->{pos_to}, $char->{pos_to})) {
-				$slave->route(undef, @{$char->{pos_to}}{qw(x y)});
-				$slave->args->{follow_route} = 1 if $slave->action eq 'route';
-				debug sprintf("Slave follow route (distance: %.2f)\n", $slave->distance()), 'homunculus';
-	
-			} elsif (timeOut($slave->{move_retry}, 0.5)) {
-				# No update yet, send move request again.
-				# We do this every 0.5 secs
-				$slave->{move_retry} = time;
-				# NOTE:
-				# The default LUA uses sendHomunculusStandBy() for the follow AI
-				# however, the server-side routing is very inefficient
-				# (e.g. can't route properly around obstacles and corners)
-				# so we make use of the sendHomunculusMove() to make up for a more efficient routing
-				$slave->sendMove ($char->{pos_to}{x}, $char->{pos_to}{y});
-				debug sprintf("Slave follow move (distance: %.2f)\n", $slave->distance()), 'homunculus';
-			}
-=pod
-		# homunculus is found
-		} elsif ($slave->{slave_lost}) {
-			if ($slave_dist < MAX_DISTANCE) {
-				delete $slave->{slave_lost};
-				delete $slave->{lostRoute};
-				my $action = $slave->findAction('route');
-				if (defined $action && $slave->args($action)->{lost_route}) {
-					for (my $i = 0; $i <= $action; $i++) {
-						$slave->dequeue
-					}
-				}
-				if (timeOut($slave->{standby_time}, 1)) {
-					$slave->sendStandBy;
-					$slave->{standby_time} = time;
-				}
-				message TF("Found %s!\n", $slave), 'homunculus';
-	
-			# attempt to find homunculus on it's last known coordinates
-			} elsif ($AI == AI::AUTO && !$slave->{lostRoute}) {
-				if ($config{homunculus_StandByAuto}) {
-					message TF("Stand By Homun\n", $slave), 'teleport';
-					$slave->sendStandBy;
-				} elsif ($config{teleportAuto_lostHomunculus}) {
-					message TF("Teleporting to get %s back\n", $slave), 'teleport';
-					useTeleport(1);
-				} else {
-					my $x = $slave->{pos_to}{x};
-					my $y = $slave->{pos_to}{y};
-					my $distFromGoal = $config{$slave->{configPrefix}.'followDistanceMax'};
-					$distFromGoal = MAX_DISTANCE if ($distFromGoal > MAX_DISTANCE);
-					main::ai_route($field->baseName, $x, $y, distFromGoal => $distFromGoal, attackOnRoute => 1, noSitAuto => 1);
-					$slave->args->{lost_route} = 1 if $slave->action eq 'route';
-					message TF("Trying to find %s at location %d, %d (you are currently at %d, %d)\n", $slave, $x, $y, $char->{pos_to}{x}, $char->{pos_to}{y}), 'homunculus';
-				}
-				$slave->{lostRoute} = 1;
-			}
-		
-		# homunculus is lost
-		} elsif ($slave->{actorType} eq 'Homunculus' && $slave_dist >= MAX_DISTANCE && !$slave->{slave_lost}) {
-			$slave->{slave_lost} = 1;
-			message TF("You lost %s!\n", $slave), 'homunculus';
-=cut
-		# if your homunculus is idle, make it move near you
-		} elsif (
-			$slave->{slave_AI} == AI::AUTO
-			&& $slave->isIdle
-			&& $slave_dist > ($config{$slave->{configPrefix}.'followDistanceMin'} || 3)
-			&& $slave_dist < MAX_DISTANCE
-			&& timeOut($slave->{standby_time}, 2)
-		) {
-			$slave->sendStandBy;
-			$slave->{standby_time} = time;
-			debug sprintf("Slave standby (distance: %.2f)\n", $slave->distance()), 'homunculus';
-	
-		# if you are idle, move near the homunculus
-		} elsif (
-			$slave->{actorType} eq 'Homunculus' &&
-			$AI == AI::AUTO && AI::isIdle && !$slave->isIdle
-			&& $config{$slave->{configPrefix}.'followDistanceMax'}
-			&& $slave_dist > $config{$slave->{configPrefix}.'followDistanceMax'}
-		) {
-			main::ai_route($field->baseName, $slave->{pos_to}{x}, $slave->{pos_to}{y}, distFromGoal => ($config{$slave->{configPrefix}.'followDistanceMin'} || 3), attackOnRoute => 1, noSitAuto => 1);
-			message TF("%s moves too far (distance: %.2f) - Moving near\n", $slave, $slave->distance), 'homunculus';
-	
-		# Main Homunculus AI
-		} else {
-			return unless $slave->{slave_AI};
-			return if $slave->processClientSuspend;
-			$slave->processAttack;
-			$slave->processTask('route', onError => sub {
-				my ($task, $error) = @_;
-				if (!($task->isa('Task::MapRoute') && $error->{code} == Task::MapRoute::TOO_MUCH_TIME())
-				 && !($task->isa('Task::Route') && $error->{code} == Task::Route::TOO_MUCH_TIME())) {
-					error("$error->{message}\n");
-				}
-			});
-			$slave->processTask('move');
-			return unless $slave->{slave_AI} == AI::AUTO;
-			$slave->processAutoAttack;
-		}
-	}
+    $slave->processFollow     && return;
+    $slave->processIdle       && return;
+    $slave->processMasterIdle && return;
+
+    # Main Homunculus AI
+    return if !$slave->{slave_AI};
+    return if $slave->processClientSuspend;
+    $slave->processAttack;
+    $slave->processTask('route', onError => sub {
+        my ($task, $error) = @_;
+        if (!($task->isa('Task::MapRoute') && $error->{code} == Task::MapRoute::TOO_MUCH_TIME())
+         && !($task->isa('Task::Route') && $error->{code} == Task::Route::TOO_MUCH_TIME())) {
+            error("$error->{message}\n");
+        }
+    });
+    $slave->processTask('move');
+    return if $slave->{slave_AI} != AI::AUTO;
+    $slave->processAutoAttack if $config{"$slave->{configPrefix}attackAuto"} > -1;
 }
 
 sub slave_setMapChanged {
@@ -441,7 +484,7 @@ sub processAttack {
 		if (!$cleanMonster) {
 			# Drop target if it's already attacked by someone else
 			$target->{homunculus_attack_failed} = time if $monsters{$ID};
-			message TF("Dropping target - %s will not kill steal others\n", $slave), 'homunculus_attack';
+			message TF("Dropping target - %s will not kill steal others - %s\n", $slave, $Globals::unclean_reason), 'homunculus_attack';
 			$slave->sendMove ($realMyPos->{x}, $realMyPos->{y});
 			$slave->dequeue;
 			if ($config{$slave->{configPrefix}.'teleportAuto_dropTargetKS'}) {
@@ -795,9 +838,10 @@ sub processAutoAttack {
 				# - Are inside others' area spells (this includes being trapped).
 				# - Are moving towards other players.
 				# - Are behind a wall
-				next if (#( $monster->{statuses} && scalar(keys %{$monster->{statuses}}) ) || 
-					objectInsideSpell($monster)
-					|| objectIsMovingTowardsPlayer($monster));
+				# Status check fails for some statuses which are not player-inflicted. Eg, BODYSTATE_UNDEAD.
+				#next if $monster->{statuses} && scalar keys %{$monster->{statuses}};
+				next if objectInsideSpell($monster);
+				next if objectIsMovingTowardsPlayer($monster, 1);
 					
 				if ($config{$slave->{configPrefix}.'attackCanSnipe'}) {
 					next if (!checkLineSnipable($slave->{pos_to}, $pos));

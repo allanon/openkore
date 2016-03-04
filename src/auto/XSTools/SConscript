@@ -153,7 +153,7 @@ deps_path = []
 if not win32:
 	deps += [READLINE_LIB]
 	if have_ncurses:
-		deps += ['ncurses']
+		deps += ['ncursesw']
 	else:
 		deps += ['termcap']
 		deps_path += ['/usr/lib/termcap']

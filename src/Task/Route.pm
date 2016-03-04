@@ -27,7 +27,7 @@ use Task::WithSubtask;
 use base qw(Task::WithSubtask);
 use Task::Move;
 
-use Globals qw($field $net %config);
+use Globals qw($field $net %config $char $npcsList $playersList $slavesList $monstersList);
 use Log qw(message debug warning);
 use Network;
 use Field;
@@ -78,7 +78,7 @@ sub new {
 	my $self = $class->SUPER::new(@_, autostop => 1, autofail => 0, mutexes => ['movement']);
 
 	unless ($args{actor}->isa('Actor') and $args{x} != 0 and $args{y} != 0) {
-		ArgumentException->throw(error => "Invalid arguments.");
+		ArgumentException->throw(error => "Task::Route: Invalid arguments.");
 	}
 
 	my $allowed = new Set('maxDistance', 'maxTime', 'distFromGoal', 'pyDistFromGoal',
@@ -181,6 +181,7 @@ sub iterate {
 	} elsif ($self->{stage} eq 'Route Solution Ready') {
 		my $begin = time;
 		my $solution = $self->{solution};
+#open FP, '>>', '/tmp/route.log'; print FP "L ".__LINE__." $self->{stage} ".@$solution." ".join( ' ', map { "($_->{x},$_->{y})" } @$solution)."\n"; close FP;
 		if ($self->{maxDistance} > 0 && $self->{maxDistance} < 1) {
 			# Fractional route motion
 			$self->{maxDistance} = int($self->{maxDistance} * scalar(@{$solution}));
@@ -221,6 +222,8 @@ sub iterate {
 		}
 
 	} elsif ($self->{stage} eq 'Walk the Route Solution') {
+#my $solution = $self->{solution};
+#open FP, '>>', '/tmp/route.log'; print FP "L ".__LINE__." $self->{stage} ".@$solution." ".join( ' ', map { "($_->{x},$_->{y})" } @$solution)."\n"; close FP;
 		my $pos = calcPosition($self->{actor});
 		my ($cur_x, $cur_y) = ($pos->{x}, $pos->{y});
 
@@ -245,7 +248,9 @@ sub iterate {
 			my $wasZero = $self->{index} == 0;
 			$self->{index} = int($self->{index} * 0.8);
 			if ($self->{index}) {
-				debug "Route $self->{actor} - not moving, decreasing step size to $self->{index}\n", "route";
+#				debug "Route $self->{actor} - not moving, decreasing step size to $self->{index}\n", "route";
+				debug "Route $self->{actor} - not moving, decreasing step size to $self->{index} ($self->{actor}->{pos}->{x},$self->{actor}->{pos}->{y}) => ($self->{actor}->{pos_to}->{x},$self->{actor}->{pos_to}->{y}) :: $cur_x,$cur_y\n", "route";
+				debug "Route $self->{actor} - not moving,                    CHAR $self->{index} ($char->{pos}->{x},$char->{pos}->{y}) => ($char->{pos_to}->{x},$char->{pos_to}->{y}) :: $cur_x,$cur_y\n", "route";
 				if (@{$self->{solution}}) {
 					# If we still have more points to cover, walk to next point
 					$self->{index} = @{$self->{solution}} - 1 if $self->{index} >= @{$self->{solution}};
@@ -284,6 +289,7 @@ sub iterate {
 			$self->{index}++ if (($self->{index} < $config{$self->{actor}{configPrefix}.'route_step'})
 			  && ($self->{old_x} != $cur_x || $self->{old_y} != $cur_y));
 
+#open FP, '>>', '/tmp/route.log'; print FP "L ".__LINE__." $self->{stage} ".@$solution." $self->{index} ".join( ' ', map { "($_->{x},$_->{y})" } @$solution)."\n"; close FP;
 			if (defined($self->{old_x}) && defined($self->{old_y})) {
 				# See how far we've walked since the last move command and
 				# trim down the soultion tree by this distance.
@@ -305,7 +311,23 @@ sub iterate {
 				debug "Route $self->{actor} - trimming down solution (" . @{$solution} . ") by $trimsteps steps\n", "route";
 				splice(@{$solution}, 0, $trimsteps) if ($trimsteps > 0);
 			}
+#open FP, '>>', '/tmp/route.log'; print FP "L ".__LINE__." $self->{stage} ".@$solution." $self->{index} ".join( ' ', map { "($_->{x},$_->{y})" } @$solution)."\n"; close FP;
 
+			# Attempt to avoid trying to move to an occupied tile.
+			$self->{index} = @$solution - 1 if @$solution && $self->{index} >= @$solution;
+			while ( @$solution && $self->{index} > 0 ) {
+				my $pos = $self->{solution}[$self->{index}];
+				my $occupied = grep { my $p = calcPosition( $_ );$p->{x} == $pos->{x} && $p->{y} == $pos->{y} } @{ $npcsList->getItems }, @{ $playersList->getItems }, @{ $slavesList->getItems }, @{ $monstersList->getItems };
+				last if !$occupied;
+			    debug "Route $self->{actor} - skipping occupied tile ($pos->{x},$pos->{y})\n", 'route';
+				$self->{index}--;
+			}
+			if ( $self->{index} == 0 ) {
+			    debug "Route $self->{actor} - the rest of the solution (".@$solution." steps) is blocked. Aborting.\n", 'route';
+			    @$solution = ();
+			}
+
+#open FP, '>>', '/tmp/route.log'; print FP "L ".__LINE__." $self->{stage} ".@$solution." $self->{index} ".join( ' ', map { "($_->{x},$_->{y})" } @$solution)."\n"; close FP;
 			my $stepsleft = @{$solution};
 			if ($stepsleft > 0) {
 				# If we still have more points to cover, walk to next point
@@ -348,6 +370,7 @@ sub iterate {
 
 				Plugins::callHook('route', {status => 'success'});
 				$self->setDone();
+#open FP, '>>', '/tmp/route.log'; print FP "L ".__LINE__." $self->{stage} DONE\n"; close FP;
 			}
 		}
 

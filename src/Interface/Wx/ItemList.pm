@@ -15,8 +15,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7226 $
+#  $Id: ItemList.pm 7226 2010-04-01 22:34:36Z eternalharvest $
 #
 #########################################################################
 package Interface::Wx::ItemList;

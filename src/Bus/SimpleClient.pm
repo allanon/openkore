@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 5617 $
+#  $Id: SimpleClient.pm 5617 2007-04-29 08:42:41Z vcl_kore $
 #
 #########################################################################
 ##

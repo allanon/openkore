@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 5284 $
+#  $Id: Client.pm 5284 2007-01-01 17:26:40Z vcl_kore $
 #
 #########################################################################
 ##
@@ -89,6 +89,9 @@ sub setIndex {
 sub send {
 	my ($self) = @_;
 
+    my ($type) = unpack('v', $_[1]);
+    Log::debug sprintf("Sent packet: %04x    [%2d bytes]  %s\n", $type, length($_[1]), ""), "parseMsg", 0;
+	Misc::visualDump($_[1], "<< Sent packet (server)");
 	eval {
 		$self->{BSC_sock}->send($_[1], 0);
 		$self->{BSC_sock}->flush;

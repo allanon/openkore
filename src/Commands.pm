@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8888 $
+#  $Id: Commands.pm 8888 2014-08-14 21:51:54Z ya4ept $
 #
 #########################################################################
 ##
@@ -72,6 +72,7 @@ sub initHandlers {
 	booking				=> \&cmdBooking,
 	buy					=> \&cmdBuy,
 	buyer				=> \&cmdBuyer,
+	buyershop			=> \&cmdBuyerShop,
 	bs					=> \&cmdBuyShopInfoSelf,
 	c					=> \&cmdChat,
 	card				=> \&cmdCard,
@@ -160,6 +161,7 @@ sub initHandlers {
 	quit				=> \&cmdQuit,
 	rc					=> \&cmdReloadCode,
 	rc2					=> \&cmdReloadCode2,
+	rc3					=> \&cmdReloadCode3,
 	reload				=> \&cmdReload,
 	relog				=> \&cmdRelog,
 	repair				=> \&cmdRepair,
@@ -604,6 +606,25 @@ sub cmdArrowCraft {
 
 sub cmdAttack {
 	my (undef, $arg1) = @_;
+
+	$arg1 =~ s/^\s+|\s+$//gos;
+    if ( $arg1 =~ /^(\d+)\s+(\d+)$/ ) {
+        my ( $x, $y ) = ( $1, $2 );
+        my $id;
+        foreach ( 0 .. $#monstersID ) {
+            my $mob = $monsters{ $monstersID[$_] };
+            next if !$mob;
+            next if $mob->{pos}->{x} != $x;
+            next if $mob->{pos}->{y} != $y;
+            $id = $_;
+        }
+        if ( !$id ) {
+            error TF( "Error in function 'a' (Attack Monster)\nThere is no monster at (%s).\n", $arg1 );
+            return;
+        }
+        $arg1 = $id;
+    }
+
 	if ($arg1 =~ /^\d+$/) {
 		if ($monstersID[$arg1] eq "") {
 			error TF("Error in function 'a' (Attack Monster)\n" .
@@ -1321,8 +1342,7 @@ sub cmdCloseBuyShop {
 
 sub cmdConf {
 	my (undef, $args) = @_;
-	my ($arg1) = $args =~ /^(\w*\.*\w+)/;
-	my ($arg2) = $args =~ /^\w*\.*\w+\s+([\s\S]+)\s*$/;
+	my ($force, $arg1, $arg2) = $args =~ /^(-f\s*)?(\S+)\s*(.*)$/;
 
 	# Basic Support for "label" in blocks. Thanks to "piroJOKE"
 	if ($arg1 =~ /\./) {
@@ -1350,8 +1370,13 @@ sub cmdConf {
 		error T("Syntax Error in function 'conf' (Change a Configuration Key)\n" .
 			"Usage: conf <variable> [<value>|none]\n");
 
-	} elsif (!exists $config{$arg1}) {
-		error TF("Config variable %s doesn't exist\n", $arg1);
+	} elsif ($arg1 =~ /\*/) {
+	    my $pat = $arg1;
+	    $pat =~ s/\*/.*/gso;
+	    my @keys = grep { /$pat/i } sort keys %config;
+		error TF("Config variables matching %s do not exist\n", $arg1) if !@keys;
+    	message TF("Config '%s' is %s\n", $_, defined $config{$_} ? $config{$_} : 'not set'), "info" foreach @keys;
+	} elsif (!exists $config{$arg1} && !$force) {
 
 	} elsif ($arg2 eq "") {
 		my $value = $config{$arg1};
@@ -1642,7 +1667,7 @@ sub cmdDrop {
 	my (undef, $args) = @_;
 	my ($arg1) = $args =~ /^([\d,-]+)/;
 	my ($arg2) = $args =~ /^[\d,-]+ (\d+)$/;
-	if (($arg1 eq "") or ($arg1 < 0)) {
+	if ($arg1 eq "" || $arg1 =~ /(^|,)-/) {
 		error T("Syntax Error in function 'drop' (Drop Inventory Item)\n" .
 			"Usage: drop <item #> [<amount>]\n");
 	} else {
@@ -1778,7 +1803,6 @@ sub cmdEval {
 sub cmdExp {
 	my (undef, $args) = @_;
 	my $knownArg;
-	my $msg;
 
 	# exp report
 	my ($arg1) = $args =~ /^(\w+)/;
@@ -1806,11 +1830,7 @@ sub cmdExp {
 		return;
 	}
 
-	if ($arg1 eq "output") {
-		open(F, ">>:utf8", "$Settings::logs_folder/exp.txt");
-	}
-	
-	if (($arg1 eq "") || ($arg1 eq "report") || ($arg1 eq "output")) {
+	if (($arg1 eq "") || ($arg1 eq "report")) {
 		$knownArg = 1;
 		my ($endTime_EXP, $w_sec, $bExpPerHour, $jExpPerHour, $EstB_sec, $percentB, $percentJ, $zenyMade, $zenyPerHour, $EstJ_sec, $percentJhr, $percentBhr);
 		$endTime_EXP = time;
@@ -1833,7 +1853,7 @@ sub cmdExp {
 		}
 		$char->{deathCount} = 0 if (!defined $char->{deathCount});
 
-		$msg .= center(T(" Exp Report "), 50, '-') ."\n".
+		my $msg = center(T(" Exp Report "), 50, '-') ."\n".
 				TF( "Botting time : %s\n" .
 					"BaseExp      : %s %s\n" .
 					"JobExp       : %s %s\n" .
@@ -1857,12 +1877,12 @@ sub cmdExp {
 		}
 	}
 
-	if (($arg1 eq "monster") || ($arg1 eq "report") || ($arg1 eq "output")) {
+	if (($arg1 eq "monster") || ($arg1 eq "report")) {
 		my $total;
 
 		$knownArg = 1;
 
-		$msg .= center(T(" Monster Killed Count "), 40, '-') ."\n".
+		my $msg = center(T(" Monster Killed Count "), 40, '-') ."\n".
 			T("#   ID     Name                    Count\n");
 		for (my $i = 0; $i < @monsters_Killed; $i++) {
 			next if ($monsters_Killed[$i] eq "");
@@ -1874,29 +1894,23 @@ sub cmdExp {
 		$msg .= "\n" .
 			TF("Total number of killed monsters: %s\n", $total) .
 			('-'x40) . "\n";
-		if ($arg1 eq "monster" || $arg1 eq "") {
-			message $msg, "list";
-		}
+		message $msg, "list";
 	}
 
-	if (($arg1 eq "item") || ($arg1 eq "report") || ($arg1 eq "output")) {
+	if (($arg1 eq "item") || ($arg1 eq "report")) {
 		$knownArg = 1;
 
-		$msg .= center(T(" Item Change Count "), 36, '-') ."\n".
+		my $msg = center(T(" Item Change Count "), 36, '-') ."\n".
 			T("Name                           Count\n");
 		for my $item (sort keys %itemChange) {
 			next unless $itemChange{$item};
 			$msg .= swrite(
-				"@<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<",
+				"@<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<",
 				[$item, $itemChange{$item}]);
 		}
 		$msg .= ('-'x36) . "\n";
 		message $msg, "list";
-		
-		if ($arg1 eq "output") {
-			print F $msg;
-			close(F);
-		}
+
 	}
 
 	if (!$knownArg) {
@@ -1975,25 +1989,27 @@ sub cmdFriend {
 		return;
 
 	} elsif ($arg1 eq "request") {
-		my $player = Match::player($arg2);
+		my $name = $arg2;
+		if ($arg2 =~ /^\d+$/) {
+			my $player = Match::player($name);
+			$name = $player && $player->{name};
+		}
 
-		if (!$player) {
+		if (!$name) {
 			error TF("Player %s does not exist\n", $arg2);
-		} elsif (!defined $player->{name}) {
-			error T("Player name has not been received, please try again\n");
 		} else {
 			my $alreadyFriend = 0;
 			for (my $i = 0; $i < @friendsID; $i++) {
-				if ($friends{$i}{'name'} eq $player->{name}) {
+				if ($friends{$i}{'name'} eq $name) {
 					$alreadyFriend = 1;
 					last;
 				}
 			}
 			if ($alreadyFriend) {
-				error TF("%s is already your friend\n", $player->{name});
+				error TF("%s is already your friend\n", $name);
 			} else {
-				message TF("Requesting %s to be your friend\n", $player->{name});
-				$messageSender->sendFriendRequest($players{$playersID[$arg2]}{name});
+				message TF("Requesting %s to be your friend\n", $name);
+				$messageSender->sendFriendRequest($name);
 			}
 		}
 
@@ -2062,29 +2078,22 @@ sub cmdSlave {
 	}
 	my $string = $cmd;
 
-	if (!$slave || !$slave->{appear_time}) {
+	if (
+		!$slave || !$slave->{appear_time} || (
+			$slave->{actorType} eq 'Homunculus' and $slave->{state} & 2 || $slave->{state} & 4
+		)
+	) {
 		error T("Error: No slave detected.\n");
 
-	} elsif ($slave->{actorType} eq 'Homunculus' && $slave->{state} & 2) {
-			my $skill = new Skill(handle => 'AM_CALLHOMUN');
-			error TF("Homunculus is in rest, use skills '%s' (ss %d).\n", $skill->getName, $skill->getIDN);
-
-	} elsif ($slave->{actorType} eq 'Homunculus' && $slave->{state} & 4) {
-			my $skill = new Skill(handle => 'AM_RESURRECTHOMUN');
-			error TF("Homunculus is dead, use skills '%s' (ss %d).\n", $skill->getName, $skill->getIDN);
-		
 	} elsif ($subcmd eq "s" || $subcmd eq "status") {
-		my $hp_string = $slave->{hp}. '/' .$slave->{hp_max} . ' (' . sprintf("%.2f",$slave->{hpPercent}) . '%)';
-		my $sp_string = $slave->{sp}."/".$slave->{sp_max}." (".sprintf("%.2f",$slave->{spPercent})."%)";
-		my $exp_string = (
-			defined $slave->{exp}
-			? T("Exp: ") . formatNumber($slave->{exp})."/".formatNumber($slave->{exp_max})." (".sprintf("%.2f",$slave->{expPercent})."%)"
-			: (
-				defined $slave->{kills}
-				? T("Kills: ") . formatNumber($slave->{kills})
-				: ''
-			)
-		);
+		my $hp_string = swrite( 'HP: @>>>>>>>>>/@>>>>>>>>> (@>>>>>%)', [ formatNumber( $slave->{'hp'} ), formatNumber( $slave->{'hp_max'} ), sprintf( '%.2f', $slave->hpPercent ) ] );
+		my $sp_string = swrite( 'SP: @>>>>>>>>>/@>>>>>>>>> (@>>>>>%)', [ formatNumber( $slave->{'sp'} ), formatNumber( $slave->{'sp_max'} ), sprintf( '%.2f', $slave->spPercent ) ] );
+		my $xp_string = '';
+		if ( defined $slave->{'exp'} ) {
+			$xp_string = swrite( 'XP: @>>>>>>>>>/@>>>>>>>>> (@>>>>>%)', [ formatNumber( $slave->{'exp'} ), formatNumber( $slave->{'exp_max'} ), sprintf( '%.2f', $slave->expPercent ) ] );
+		} elsif ( defined $slave->{kills} ) {
+			$xp_string = swrite( 'Kills: @>>>>>>>>>', [ formatNumber( $slave->{kills} ) ] );
+		}
 
 		my ($intimacy_label, $intimacy_string) = (
 			defined $slave->{intimacy}
@@ -2105,20 +2114,20 @@ sub cmdSlave {
 
 		my $msg = swrite(
 		center(T(" Slave Status "), 78, '-') . "\n" .
-		T("Name: \@<<<<<<<<<<<<<<<<<<<<<<<<<  HP: \@>>>>>>>>>>>>>>>>>>\n" .
-		"Type: \@<<<<<<<<<<<<<<<<<<<<<<<<<  SP: \@>>>>>>>>>>>>>>>>>>\n" .
-		"Job:  \@<<<<<<<<<<<<<<<\n" .
-		"Level: \@<<  \@>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n") .
+		T("Name:  \@<<<<<<<<<<<<<<<<<<<<<<<<< \@<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n" .
+		  "Type:  \@<<<<<<<<<<<<<<<<<<<<<<<<< \@<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n" .
+		  "Level: \@<<                        \@<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n" .
+		  "Job:   \@<<<<<<<<<<<<<<<\n") .
 		"\n" .
-		T("Atk:  \@>>>     Matk:     \@>>>     Hunger:       \@>>>\n" .
-		"Hit:  \@>>>     Critical: \@>>>     \@<<<<<<<<<    \@>>>\n" .
-		"Def:  \@>>>     Mdef:     \@>>>     Accessory:    \@>>>\n" .
-		"Flee: \@>>>     Aspd:     \@>>>     Summons:      \@>>>\n" .
-		"Range: \@>>     Skill pt: \@>>>     Contract End:  \@<<<<<<<<<<\n"),
+		T("Atk: \@>>>   Matk:     \@>>>    Hunger:      \@>>>\n" .
+		  "Hit: \@>>>   Critical: \@>>>    \@<<<<<<<<<   \@>>>\n" .
+		  "Def: \@>>>   Mdef:     \@>>>    Accessory:   \@>>>\n" .
+		  "Flee:\@>>>   Aspd:     \@>>>    Summons:     \@>>>\n" .
+		  "Range:\@>>   Skill pt: \@>>>    Contract End: \@>>>>>>>>>>\n"),
 		[$slave->{'name'}, $hp_string,
 		$slave->{'actorType'}, $sp_string,
+		$slave->{'level'}, $xp_string,
 		$jobs_lut{$slave->{'jobId'}},
-		$slave->{'level'}, $exp_string,
 		$slave->{'atk'}, $slave->{'matk'}, $hunger_string,
 		$slave->{'hit'}, $slave->{'critical'}, $intimacy_label, $intimacy_string,
 		$slave->{'def'}, $slave->{'mdef'}, $accessory_string,
@@ -2588,7 +2597,7 @@ sub cmdGuild {
 		$messageSender->sendGuildRequestInfo(4);
 
 		if ($arg1 eq "") {
-			message T("Enter command to view guild information: guild <info | member | request | join | leave | kick | ally | create | break>\n"), "info";
+			message T("Enter command to view guild information: guild <info | member | positions | position | assign | request | join | leave | kick | ally | notice | create | break>\n"), "info";
 		} else {
 			message	TF("Type 'guild %s' again to view the information.\n", $args), "info";
 		}
@@ -2613,6 +2622,21 @@ sub cmdGuild {
 		$msg .= ('-'x40) . "\n";
 		message $msg, "info";
 
+	} elsif ($arg1 eq 'positions') {
+		if (!$guild{positions}) {
+			error T("No guild position information available.\n");
+			return;
+		}
+		my $msg = "---------------- Guild Position ----------------\n";
+		$msg .= "#  Title                       Invite Punish Tax\n";
+		my $i = 0;
+		foreach ( @{ $guild{positions} } ) {
+			$i++;
+			$msg .= swrite("@< @<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<< @<<<<< @>>",
+					[$i, $_->{title}, $_->{invite}, $_->{punish}, $_->{feeEXP}]);
+		}
+		$msg .= "------------------------------------------------\n";
+		message $msg, 'list';
 	} elsif ($arg1 eq "member") {
 		if (!$guild{member}) {
 			error T("No guild member information available.\n");
@@ -2620,7 +2644,9 @@ sub cmdGuild {
 		}
 
 		my $msg = center(T(" Guild  Member "), 79, '-') ."\n".
-			T("#  Name                       Job           Lv  Title                    Online\n");
+			T("#  Name                       Job        Lv  Title                    XP          Online Position\n");
+		message $msg, 'list';
+		$msg = '';
 
 		my ($i, $name, $job, $lvl, $title, $online, $ID, $charID);
 		my $count = @{$guild{member}};
@@ -2635,9 +2661,13 @@ sub cmdGuild {
 			$online = $guild{member}[$i]{online} ? T("Yes") : T("No");
 			$ID = unpack("V",$guild{member}[$i]{ID});
 			$charID = unpack("V",$guild{member}[$i]{charID});
+			my $pos = $guild{member}[$i]{pos};
+			$pos = $pos && $pos->{x} && sprintf '%3d,%3d', $pos->{x}, $pos->{y};
 
-			$msg .= swrite("@< @<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<<< @<< @<<<<<<<<<<<<<<<<<<<<<<< @<<",
-					[$i, $name, $job, $lvl, $title, $online, $ID, $charID]);
+			$msg .= swrite("@< @<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<< @>> @<<<<<<<<<<<<<<<<<<<<<<< @>>>>>>>>>> @<<<<< @<<<<<<<",
+					[$i, $name, $job, $lvl, $title, formatNumber($guild{member}[$i]{contribution} || 0), $online, $pos]);
+			message $msg, ($guild{member}[$i]{online} ? "list" : 'listoffline');
+			$msg = '';
 		}
 		$msg .= ('-'x79) . "\n";
 		message $msg, "list";
@@ -2700,7 +2730,18 @@ sub cmdGuild {
 			$messageSender->sendGuildSetAlly($net,$player->{ID},$accountID,$charID);
 			message TF("Sent guild alliance request to %s\n", $player->{name});
 		}
+	} elsif ($arg1 eq "notice" && !$arg2) {
+		message TF("---Guild Notice---\n%s\n------------------\n", $guild{notice}), 'guildnotice';
+	} elsif ($arg1 eq "notice" && $arg2) {
+		if (!$guild{master}) {
+			error T("You must be the guild master to update the guild notice.\n");
+			return;
+		}
 
+		# Support newlines.
+		$arg2 =~ s/\\n/\n/gos;
+
+		$messageSender->sendGuildNotice( $char->{guildID}, "", $arg2 );
 	} elsif ($arg1 eq "leave") {
 		$messageSender->sendGuildLeave($arg2);
 		message TF("Sending guild leave: %s\n", $arg2);
@@ -2714,11 +2755,60 @@ sub cmdGuild {
 			message TF("Sending guild break: %s\n", $arg2);
 		}
 
-	} elsif ($arg1 eq "kick") {
-		if (!$guild{member}) {
-			error T("No guild member information available.\n");
+	} elsif (!$guild{member}) {
+		error T("No guild member information available.\n");
+		return;
+	} elsif ($arg1 eq 'position') {
+		my ($i, $invite, $punish, $tax, $title) = parseArgs($arg2);
+		my $usage = T("Usage: guild position i invite punish tax title\n");
+		if ($i < 1 || $i > 20) {
+			error T("Guild position must be between 2 and 20.\n");
+			error $usage;
 			return;
 		}
+		$tax = int $tax;
+		if ($tax < 0 || $tax > 50) {
+			error T("Guild tax must be between 0 and 50.\n");
+			error $usage;
+			return;
+		}
+		if (length $title < 1 || length $title > 24) {
+			error T("Guild position title must be between 1 and 24 characters.\n");
+			error $usage;
+			return;
+		}
+		$invite = $invite ? 1 : 0;
+		$punish = $punish ? 1 : 0;
+		$messageSender->sendGuildPositionInfo([{ index => $i - 1, invite => $invite, punish => $punish, tax => $tax, title => $title }]);
+		$messageSender->sendGuildRequestInfo(2);
+	} elsif ($arg1 eq 'assign') {
+		my ($member, $title) = parseArgs($arg2);
+		my $usage = T("Usage: guild assign <member> <title>\n");
+		my $i = $member;
+		if ($member !~ /^\d+$/) {
+			($i) = grep { $guild{member}[$_]{name} eq $member } 0..$#{$guild{member}};
+		}
+		if (!$i || !$guild{member}[$i]) {
+			error T("Error in function 'guild assign' (Assign Guild Title)\n");
+			error TF("Invalid guild member '%s' specified.\n", $member);
+			error $usage;
+			return;
+		}
+		my $j = $title;
+		if ($title =~ /^\d+$/) {
+			$j--;
+		} else {
+			($j) = grep { $guild{positions}[$_]{title} eq $title } 0..$#{$guild{positions}};
+		}
+		if ($j <= 0 || !$guild{positions}[$j]) {
+			error T("Error in function 'guild assign' (Assign Guild Title)\n");
+			error TF("Invalid guild title '%s' specified.\n", $title);
+			error $usage;
+			return;
+		}
+		$messageSender->sendGuildMemberPositions([{ accountID => $guild{member}[$i]{ID}, charID => $guild{member}[$i]{charID}, index => $j }]);
+		$messageSender->sendGuildRequestInfo(1);
+	} elsif ($arg1 eq "kick") {
 		my @params = split(' ', $arg2, 2);
 		if ($params[0] =~ /^\d+$/) {
 			if ($guild{'member'}[$params[0]]) {
@@ -2773,6 +2863,8 @@ sub cmdHelp {
 				} else {
 					$msg .= sprintf("%-11s  %s\n",$switch, $customCommands{$switch}{desc}->[0]);
 				}
+			} else {
+				$msg .= sprintf("%-11s  %s\n",$switch, $customCommands{$switch}{desc});
 			}
 			push @found, $switch;
 		} else {
@@ -2854,7 +2946,7 @@ sub cmdIdentify {
 		}
 		$msg .= ('-'x50) . "\n";
 		message $msg, "list";
-	} elsif (!@identifyID) {
+	} elsif (!defined @identifyID) {
 		error T("The identify list is empty, please use the identify skill or a magnifier first.\n");
 	} elsif ($arg1 =~ /^\d+$/) {
 		if ($identifyID[$arg1] eq "") {
@@ -3192,9 +3284,9 @@ sub cmdMonsterList {
 	} else {
 		my ($dmgTo, $dmgFrom, $dist, $pos, $name, $monsters);
 		my $msg = center(T(" Monster List "), 79, '-') ."\n".
-			T("#   Name                        ID      DmgTo DmgFrom  Distance    Coordinates\n");
+			T("#   Name                        ID      DmgTo DmgFrom  Distance    Coordinates Dir   Look\n");
 		$monsters = $monstersList->getItems() if ($monstersList);
-		foreach my $monster (@{$monsters}) {
+		foreach my $monster (@$monsters) {
 			$dmgTo = ($monster->{dmgTo} ne "")
 				? $monster->{dmgTo}
 				: 0;
@@ -3208,9 +3300,10 @@ sub cmdMonsterList {
 			if ($name ne $monster->{name_given}) {
 				$name .= '[' . $monster->{name_given} . ']';
 			}
+			my $dir = { x => $monster->{pos_to}->{x} - $monster->{pos}->{x}, y => $monster->{pos_to}->{y} - $monster->{pos}->{y} };
 			$msg .= swrite(
-				"@<< @<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<< @<<<< @<<<<    @<<<<<      @<<<<<<<<<<",
-				[$monster->{binID}, $name, $monster->{binType}, $dmgTo, $dmgFrom, $dist, $pos]);
+				"@<< @<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<< @<<<< @<<<<    @<<<<<      @<<<<<<<<<< @>>,@<< @<<<",
+				[$monster->{binID}, $name, $monster->{binType}, $dmgTo, $dmgFrom, $dist, $pos, $dir->{x}, $dir->{y}, $monster->{look}->{body}]);
 		}
 		$msg .= ('-'x79) . "\n";
 		message $msg, "list";
@@ -3223,45 +3316,40 @@ sub cmdMove {
 		return;
 	}
 	my (undef, $args) = @_;
-	my @args_split = split(/\s+/, $args);
+	my @args = split /\s+/, $args;
 
-	my ($map_or_portal, $x, $y, $dist);
-	if (($args_split[0] =~ /^\d+$/) && ($args_split[1] =~ /^\d+$/) && ($args_split[2] =~ /^\S+$/)) {
+	my $attackOnRoute = 1;
+	while (@args && $args[0] =~ /^-([a-z])$/o) {
+		my $o = shift @args;
+		$attackOnRoute = 2 if $o eq '-a';
+	}
+
+	my ($map, $x, $y, $dist);
+	if (@args == 1) {
+		# map name or portal number
+		$map = $args[0];
+	} elsif (@args == 2) {
+		# coordinates
+		($x, $y) = @args;
+		$map = $field->baseName;
+	} elsif (@args == 3 && $args[0] =~ /^\d+$/ && $args[2] =~ /^\d+$/) {
+		# coordinates and dist
+		($x, $y, $dist) = @args;
+		$map = $field->baseName;
+	} elsif (@args >= 3 && $args[0] =~ /^\d+$/) {
 		# coordinates and map
-		$map_or_portal = $args_split[2];
-		$x = $args_split[0];
-		$y = $args_split[1];
-	} elsif (($args_split[0] =~ /^\S+$/) && ($args_split[1] =~ /^\d+$/) && ($args_split[2] =~ /^\d+$/)) {
+		($x, $y, $map, $dist) = @args;
+	} elsif (@args >= 3) {
 		# map and coordinates
-		$map_or_portal = $args_split[0];
-		$x = $args_split[1];
-		$y = $args_split[2];
-	} elsif (($args_split[0] =~ /^\S+$/) && !$args_split[1]) {
-		# map only
-		$map_or_portal = $args_split[0];
-	} elsif (($args_split[0] =~ /^\d+$/) && ($args_split[1] =~ /^\d+$/) && !$args_split[2]) {
-		# coordinates only
-		$map_or_portal = $field->baseName;
-		$x = $args_split[0];
-		$y = $args_split[1];
-	} else {
+		($map, $x, $y) = @args;
+	}
+	
+	if (!@args || ($x && $x !~ /^\d+$/) || ($y && $y !~ /^\d+$/)) {
 		error T("Syntax Error in function 'move' (Move Player)\n" .
-			"Usage: move <x> <y> [<map> [<distance from coordinates>]]\n" .
-			"       move <map> [<x> <y> [<distance from coordinates>]]\n" .
+			"Usage: move <x> <y> [<map>] [dist]\n" .
+			"       move <map> [<x> <y>]\n" .
 			"       move <portal#>\n");
-	}
-
-	# if (($args_split[0] =~ /^\d+$/) && ($args_split[1] =~ /^\d+$/) && ($args_split[2] =~ /^\d+$/)) {
-		# # distance from x, y
-		# $dist = $args_split[2];
-	# } elsif {
-	if ($args_split[3] =~ /^\d+$/) {
-		# distance from map x, y
-		$dist = $args_split[3];
-	}
-
-
-	if ($map_or_portal eq "stop") {
+	} elsif ($map eq "stop") {
 		AI::clear(qw/move route mapRoute/);
 		message T("Stopped all movement\n"), "success";
 	} else {
@@ -3275,58 +3363,64 @@ sub cmdMove {
 				"Unable to walk while the shop is open!\n" .
 				"Use the command: closeshop\n");
 		} else {
-			if ($map_or_portal =~ /^\d+$/) {
-				if ($portalsID[$map_or_portal]) {
+			if ($map =~ /^\d+$/) {
+				if ($portalsID[$map]) {
 					message TF("Move into portal number %s (%s,%s)\n",
-						$map_or_portal, $portals{$portalsID[$map_or_portal]}{'pos'}{'x'}, $portals{$portalsID[$map_or_portal]}{'pos'}{'y'});
-					main::ai_route($field->baseName, $portals{$portalsID[$map_or_portal]}{'pos'}{'x'}, $portals{$portalsID[$map_or_portal]}{'pos'}{'y'}, attackOnRoute => 1, noSitAuto => 1);
+						$map, $portals{$portalsID[$map]}{'pos'}{'x'}, $portals{$portalsID[$map]}{'pos'}{'y'});
+					main::ai_route($field->baseName, $portals{$portalsID[$map]}{'pos'}{'x'}, $portals{$portalsID[$map]}{'pos'}{'y'}, attackOnRoute => 1, noSitAuto => 1);
 				} else {
 					error T("No portals exist.\n");
 				}
 			} else {
 				# map
-				$map_or_portal =~ s/^(\w{3})?(\d@.*)/$2/; # remove instance. is it possible to move to an instance? if not, we could throw an error here
+				$map =~ s/^(\w{3})?(\d@.*)/$2/; # remove instance. is it possible to move to an instance? if not, we could throw an error here
 				# TODO: implement Field::sourceName function here once they are implemented there - 2013.11.26
-				my $file = $map_or_portal.'.fld';
+				my $file = "$map.fld";
 				$file = File::Spec->catfile($Settings::fields_folder, $file) if ($Settings::fields_folder);
 				$file .= ".gz" if (! -f $file); # compressed file
-				if ($maps_lut{"${map_or_portal}.rsw"}) {
+				if ($maps_lut{"$map.rsw"}) {
 					if ($dist) {
 						message TF("Calculating route to: %s(%s): %s, %s (Distance: %s)\n",
-							$maps_lut{$map_or_portal.'.rsw'}, $map_or_portal, $x, $y, $dist), "route";
+							$maps_lut{$map.'.rsw'}, $map, $x, $y, $dist), "route";
 					} elsif ($x ne "") {
 						message TF("Calculating route to: %s(%s): %s, %s\n",
-							$maps_lut{$map_or_portal.'.rsw'}, $map_or_portal, $x, $y), "route";
+							$maps_lut{$map.'.rsw'}, $map, $x, $y), "route";
 					} else {
 						message TF("Calculating route to: %s(%s)\n",
-							$maps_lut{$map_or_portal.'.rsw'}, $map_or_portal), "route";
+							$maps_lut{$map.'.rsw'}, $map), "route";
 					}
-					main::ai_route($map_or_portal, $x, $y,
-						attackOnRoute => 1,
+					if ($attackOnRoute == 1 && $config{lockMap} && $map eq $config{lockMap} && $map eq $field->baseName) {
+						$attackOnRoute = 0 if $config{attackAuto_inLockOnly} >= 2;
+						$attackOnRoute = 2 if $config{attackAuto_inLockOnly} == 1 && $map eq $config{lockMap};
+						$attackOnRoute = 2 if $config{attackAuto_inLockOnly} == 0;
+						$attackOnRoute = 2 if $map eq $config{lockMap} && $map eq $field->baseName;
+					}
+					main::ai_route($map, $x, $y,
+						attackOnRoute => $attackOnRoute,
 						noSitAuto => 1,
 						notifyUponArrival => 1,
 						distFromGoal => $dist);
 				} elsif (-f $file) {
 					# valid map
-					my $map_name = $maps_lut{"${map_or_portal}.rsw"}?$maps_lut{"${map_or_portal}.rsw"}:
+					my $map_name = $maps_lut{"$map.rsw"}?$maps_lut{"$map.rsw"}:
 						T('Unknown Map');
 					if ($dist) {
 						message TF("Calculating route to: %s(%s): %s, %s (Distance: %s)\n",
-							$map_name, $map_or_portal, $x, $y, $dist), "route";
+							$map_name, $map, $x, $y, $dist), "route";
 					} elsif ($x ne "") {
 						message TF("Calculating route to: %s(%s): %s, %s\n",
-							$map_name, $map_or_portal, $x, $y), "route";
+							$map_name, $map, $x, $y), "route";
 					} else {
 						message TF("Calculating route to: %s(%s)\n",
-							$map_name, $map_or_portal), "route";
+							$map_name, $map), "route";
 					}
-					main::ai_route($map_or_portal, $x, $y,
-					attackOnRoute => 1,
+					main::ai_route($map, $x, $y,
+					attackOnRoute => $attackOnRoute,
 					noSitAuto => 1,
 					notifyUponArrival => 1,
 					distFromGoal => $dist);
 				} else {
-					error TF("Map %s does not exist\n", $map_or_portal);
+					error TF("Map %s does not exist\n", $map);
 				}
 			}
 		}
@@ -3346,6 +3440,7 @@ sub cmdNPCList {
 				$msg .= swrite(
 					"@<<< @<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<   @<<<<<<<<",
 					[$i, $npc->name, $pos, $npc->{nameID}]);
+				$msg .= TF("Statuses: %s\n", $npc->statusesString);
 				$msg .= ('-'x57) . "\n";
 				message $msg, "list";
 
@@ -3412,14 +3507,23 @@ sub cmdParty {
 	my ($arg2) = $args =~ /^\w* (\S+)\b/;
 =cut
 
+	if ($arg1 eq 'kick' && $arg2 && $arg2 !~ /^\d+$/) {
+		($arg2) = grep { my $c = $char->{party}->{users}->{$partyUsersID[$_]}; $c && $c->{name} eq $arg2 } 0..$#partyUsersID;
+	}
+
 	if ($arg1 eq "" && (!$char || !$char->{'party'} || !%{$char->{'party'}} )) {
 		error T("Error in function 'party' (Party Functions)\n" .
 			"Can't list party - you're not in a party.\n");
 	} elsif ($arg1 eq "") {
-		my $msg = center(T(" Party Information "), 79, '-') ."\n".
-			TF("Party name: %s\n\n" .
-			"#    Name                   Map           Coord     Online  HP\n",
-			$char->{'party'}{'name'});
+		my $msg = center(T(" Party Information "), 79, '-') ."\n";
+        $msg .= TF(
+            "Party name: %s (EXP: %s) (Item: %s) (ItemDiv: %s)\n",
+            $char->{party}{name},
+            $char->{party}->{share}        ? 'Share' : 'Take',
+            $char->{party}->{shareItem}    ? 'Share' : 'Take',
+            $char->{party}->{shareItemDiv} ? 'Share' : 'Take',
+        );
+        $msg .= "#    Name                   Map           Coord     Online  HP\n";
 		for (my $i = 0; $i < @partyUsersID; $i++) {
 			next if ($partyUsersID[$i] eq "");
 			my $coord_string = "";
@@ -4020,33 +4124,6 @@ sub cmdPortalList {
 	} elsif ($arg eq 'recompile') {
 		Settings::loadByRegexp(qr/portals/);
 		Misc::compilePortals() if Misc::compilePortals_check();
-	} elsif ($arg =~ /^add (.*)$/) { #Manual adding portals
-		#Command: portals add mora 56 25 bif_fild02 176 162
-		#Command: portals add y_airport 143 43 y_airport 148 51 0 c r0 c r0
-		print $args."TEST\n";
-		my ($srcMap, $srcX, $srcY, $dstMap, $dstX, $dstY, $seq) = $args =~ /^add ([a-zA-Z\_\-0-9]*) (\d{1,3}) (\d{1,3}) ([a-zA-Z\_\-0-9]*) (\d{1,3}) (\d{1,3})(.*)$/; #CHECKING
-		my $srcfile = $srcMap.'.fld';
-		$srcfile = File::Spec->catfile($Settings::fields_folder, $srcfile) if ($Settings::fields_folder);
-		my $dstfile = $dstMap.'.fld';
-		$dstfile = File::Spec->catfile($Settings::fields_folder, $dstfile) if ($Settings::fields_folder);
-		print "GOOD\n" if (-f $srcfile && -f $dstfile);
-		if ($srcX > 0 && $srcY > 0 && $dstX > 0 && $dstY > 0
-			&& -f $srcfile && -f $dstfile) { #found map and valid corrdinates	
-			if ($seq) {
-				message TF("Recorded new portal (destination): %s (%s, %s) -> %s (%s, %s) [%s]\n", $srcMap, $srcX, $srcY, $dstMap, $dstX, $dstY, $seq), "portalRecord";
-				
-				FileParsers::updatePortalLUT2(Settings::getTableFilename("portals.txt"),
-					$srcMap, $srcX, $srcY,
-					$dstMap, $dstX, $dstY,
-					$seq);		
-			} else {
-				message TF("Recorded new portal (destination): %s (%s, %s) -> %s (%s, %s)\n", $srcMap, $srcX, $srcY, $dstMap, $dstX, $dstY), "portalRecord";
-				
-				FileParsers::updatePortalLUT(Settings::getTableFilename("portals.txt"),
-					$srcMap, $srcX, $srcY,
-					$dstMap, $dstX, $dstY);		
-			}
-		}
 	}
 }
 
@@ -4118,8 +4195,30 @@ sub cmdReloadCode2 {
 	}
 }
 
+sub cmdReloadCode3 {
+    my ( undef, $args ) = @_;
+    my $filename = $args;
+    my $to_path  = "$filename.pm";
+    $to_path =~ s/::/\//gos;
+    if ( $filename =~ /\.p[lm]$/ && -f $filename ) {
+        push @Modules::queue, $filename;
+    } elsif ( $INC{$to_path} ) {
+        push @Modules::queue, $INC{$to_path};
+    } else {
+        error( TF( "Unable to reload code: %s not found\n", $filename ) );
+    }
+}
+
 sub cmdRelog {
 	my (undef, $arg) = @_;
+	if ( $arg && $arg =~ /^(?:(\d+):)?(\d+):(\d+)$/ ) {
+	    # HH:MM or HH::MM:SS
+	    my $target = defined $1 ? $1 * 3600 + $2 * 60 + $3 : $2 * 3600 + $3 * 60;
+	    my @time = localtime;
+	    my $current = $time[2] * 3600 + $time[1] * 60 + $time[0];
+	    $target += 86400 if $target <= $current;
+	    $arg = $target - $current;
+	}
 	if (!$arg || $arg =~ /^\d+$/) {
 		@cmdQueueList = ();
 		$cmdQueue = 0;
@@ -4263,13 +4362,13 @@ sub cmdShopInfoSelf {
 	# FIXME: Read the packet the server sends us to determine
 	# the shop title instead of using $shop{title}.
 	my $msg = center(" $shop{title} ", 79, '-') ."\n".
-		T("#  Name                               Type            Amount        Price  Sold\n");
+		T("#  Name                                   Type        Qty  Price           Sold\n");
 	my $priceAfterSale=0;
 	my $i = 1;
 	for my $item (@articles) {
 		next unless $item;
 		$msg .= swrite(
-		   "@< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<<<<< @<<<< @>>>>>>>>>>>z @>>>>",
+			"@< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<< @>>> @>>>>>>>>>>>>z  @>>>",
 			[$i++, $item->{name}, $itemTypes_lut{$item->{type}}, $item->{quantity}, formatNumber($item->{price}), $item->{sold}]);
 		$priceAfterSale += ($item->{quantity} * $item->{price});
 	}
@@ -4792,13 +4891,14 @@ sub cmdTalk {
 	}
 	my (undef, $args) = @_;
 	my ($arg1) = $args =~ /^(\w+)/;
-	$args =~ s/^\w+\s+//;
-	my $arg2;
-	if ($args =~ /^(-?\d+)/) {
-		$arg2 = $1;
-	} else {
-		($arg2) = $args =~ /^(\/.*?\/\w?)$/;
+	my ($arg2) = $args =~ /^\w+ (\d+)/;
+
+	if ($arg1 =~ /^\d+$/ && $arg1 > 20) {
+	    my $id = pack 'V', $arg1;
+		my ( $i ) = grep { $npcsID[$_] eq $id } 0..$#npcsID;
+		$arg1 = $i if defined $i;
 	}
+
 	if ($arg1 =~ /^\d+$/ && $npcsID[$arg1] eq "") {
 		error TF("Error in function 'talk' (Talk to NPC)\n" .
 			"NPC %s does not exist\n", $arg1);
@@ -4825,20 +4925,7 @@ sub cmdTalk {
 		}
 		$msg .= ('-'x40) . "\n";
 		message $msg, "list";
-	} elsif ($arg1 eq "resp" && $arg2 =~ /^\/(.*?)\/(\w?)$/) {
-		my $regex = $1;
-		my $postCondition = $2;
-		my $index = 1;
-		foreach my $testResponse (@{$talk{'responses'}}) {
-			if ($testResponse =~ /$regex/ || ($postCondition eq 'i' && $testResponse =~ /$regex/i)) {
-				$messageSender->sendTalkResponse($talk{'ID'}, $index);
-				return;
-			}
-		} continue {
-			$index++;
-		}
-		error TF("Error in function 'talk resp' (Respond to NPC)\n" .
-			"No match was found on responses with regex %s .\n", $regex);
+
 	} elsif ($arg1 eq "resp" && $arg2 ne "" && $talk{'responses'}[$arg2] eq "") {
 		error TF("Error in function 'talk resp' (Respond to NPC)\n" .
 			"Response %s does not exist.\n", $arg2);
@@ -4855,19 +4942,20 @@ sub cmdTalk {
 		error T("Error in function 'talk num' (Respond to NPC)\n" .
 			"You must specify a number.\n");
 
-	} elsif ($arg1 eq "num" && !($arg2 =~ /^-?\d+$/)) {
+	} elsif ($arg1 eq "num" && !($arg2 =~ /^\d+$/)) {
 		error TF("Error in function 'talk num' (Respond to NPC)\n" .
 			"%s is not a valid number.\n", $arg2);
 
-	} elsif ($arg1 eq "num" && $arg2 =~ /^-?\d+$/) {
+	} elsif ($arg1 eq "num" && $arg2 =~ /^\d+$/) {
 		$messageSender->sendTalkNumber($talk{'ID'}, $arg2);
 
 	} elsif ($arg1 eq "text") {
-		if ($args eq "") {
+		my ($arg2) = $args =~ /^\w+ (.*)/;
+		if ($arg2 eq "") {
 			error T("Error in function 'talk text' (Respond to NPC)\n" .
 				"You must specify a string.\n");
 		} else {
-			$messageSender->sendTalkText($talk{'ID'}, $args);
+			$messageSender->sendTalkText($talk{'ID'}, $arg2);
 		}
 
 	} elsif ($arg1 eq "cont" && !%talk) {
@@ -4896,15 +4984,22 @@ sub cmdTalk {
 sub cmdTalkNPC {
 	my (undef, $args) = @_;
 
-	my ($x, $y, $sequence) = $args =~ /^(\d+) (\d+) (.+)$/;
-	unless (defined $x) {
-		error T("Syntax Error in function 'talknpc' (Talk to an NPC)\n" .
-			"Usage: talknpc <x> <y> <sequence>\n");
-		return;
-	}
+    if ( $args =~ /^(\d+) (\d+) (.+)$/ ) {
+        my ( $x, $y, $sequence ) = ( $1, $2, $3 );
+        message TF( "Talking to NPC at (%d, %d) using sequence: %s\n", $x, $y, $sequence );
+        AI::queue( 'NPC', Task::TalkNPC->new( x => $x, y => $y, sequence => $sequence ) );
+        return;
+    }
 
-	message TF("Talking to NPC at (%d, %d) using sequence: %s\n", $x, $y, $sequence);
-	main::ai_talkNPC($x, $y, $sequence);
+    if ( $args =~ /^(\d+) (.+)$/ ) {
+        my ( $id, $sequence ) = ( $1, $2 );
+        message TF( "Talking to NPC with ID (%d) using sequence: %s\n", $id, $sequence );
+        AI::queue( 'NPC', Task::TalkNPC->new( nameID => $id, sequence => $sequence ) );
+        return;
+    }
+
+	error T("Syntax Error in function 'talknpc' (Talk to an NPC)\n" .
+			"Usage: talknpc <x> <y> <sequence> OR talknpc <id> <sequence>\n");
 }
 
 sub cmdTank {
@@ -5263,22 +5358,42 @@ sub cmdVender {
 		return;
 	}
 	my (undef, $args) = @_;
-	my ($arg1) = $args =~ /^([\d\w]+)/;
-	my ($arg2) = $args =~ /^[\d\w]+ (\d+)/;
-	my ($arg3) = $args =~ /^[\d\w]+ \d+ (\d+)/;
-	if ($arg1 eq "") {
+	my ($arg1, $arg2, $arg3) = parseArgs($args);
+
+	if (!defined $arg1 || ($arg2 && $arg2 !~ /^\d+$/) || ($arg3 && $arg3 !~ /^\d+$/)) {
 		error T("Syntax error in function 'vender' (Vender Shop)\n" .
 			"Usage: vender <vender # | end> [<item #> <amount>]\n");
-	} elsif ($arg1 eq "end") {
+		return;
+	}
+
+	if ($arg1 eq "end") {
 		undef @venderItemList;
 		undef $venderID;
 		undef $venderCID;
-	} elsif ($venderListsID[$arg1] eq "") {
+		return;
+	}
+
+	my $vid = $arg1;
+
+    # Attempt to find vendor by name.
+    if ($arg1 !~ /^\d+$/) {
+		$vid = -1;
+		for (my $i = 0; $i < @venderListsID; $i++) {
+			next if !$venderListsID[$i];
+			my $player = Actor::get($venderListsID[$i]);
+			next if !$player;
+			next if $player->name ne $arg1;
+			$vid = $i;
+			last;
+        }
+    }
+
+	if ($vid < 0 || $venderListsID[$vid] eq "") {
 		error TF("Error in function 'vender' (Vender Shop)\n" .
 			"Vender %s does not exist.\n", $arg1);
 	} elsif ($arg2 eq "") {
-		$messageSender->sendEnteringVender($venderListsID[$arg1]);
-	} elsif ($venderListsID[$arg1] ne $venderID) {
+		$messageSender->sendEnteringVender($venderListsID[$vid]);
+	} elsif ($venderListsID[$vid] ne $venderID) {
 		error T("Error in function 'vender' (Vender Shop)\n" .
 			"Vender ID is wrong.\n");
 	} else {
@@ -5295,6 +5410,7 @@ sub cmdVenderList {
 	for (my $i = 0; $i < @venderListsID; $i++) {
 		next if ($venderListsID[$i] eq "");
 		my $player = Actor::get($venderListsID[$i]);
+		next if !$player->{pos_to}{x} && !$player->{pos_to}{y};
 		# autovivifies $obj->{pos_to} but it doesnt matter
 		$msg .= sprintf(
 			"%-3d  %-36s  (%3s, %3s)  %-20s\n",
@@ -5388,9 +5504,7 @@ sub cmdBuyer {
 		return;
 	}
 	my (undef, $args) = @_;
-	my ($arg1) = $args =~ /^([\d\w]+)/;
-	my ($arg2) = $args =~ /^[\d\w]+ (\d+)/;
-	my ($arg3) = $args =~ /^[\d\w]+ \d+ (\d+)/;
+	my ($arg1, $arg2, $arg3) = parseArgs($args);
 	if ($arg1 eq "") {
 		error T("Syntax error in function 'buyer' (Buyer Shop)\n" .
 			"Usage: buyer <buyer # | end> [<item #> <amount>]\n");
@@ -5418,6 +5532,53 @@ sub cmdBuyer {
 	}
 }
 
+# ss 2535
+# buyershop open "B>Oridecon" Oridecon=50000,50 "Rough Oridecon=10000,50"
+sub cmdBuyerShop {
+    my (undef, $input) = @_;
+
+	if (!$net || $net->getState() != Network::IN_GAME) {
+		error TF("You must be logged in the game to use this command (%s)\n", shift);
+		return;
+	}
+
+    my ( $cmd, $title, @nameprices ) = parseArgs( $input );
+
+    if ( $cmd eq 'open' ) {
+        if ( !$title ) {
+            error TF( "Error in function 'buyershop open' (Open Buyer Shop)\n" . "Title is required.\n" );
+            return;
+        }
+
+        if ( !@nameprices ) {
+            error TF( "Error in function 'buyershop open' (Open Buyer Shop)\n" . "At least one item to buy is required.\n" );
+            return;
+        }
+
+        my $items = [];
+        foreach my $nameprice ( @nameprices ) {
+            my ( $name, $price, $amount ) = $nameprice =~ m/^(.*)=(\d+),(\d+)$/o;
+            if ( !$name || !$price || !$amount ) {
+                error TF( "Error in function 'buyershop open' (Open Buyer Shop)\n" . "Invalid item spec: %s\n", $nameprice );
+                return;
+            }
+            my $item = Match::inventoryItem( $name );
+            if ( !$item ) {
+                error TF( "Error in function 'buyershop open' (Open Buyer Shop)\n" . "Inventory Item %s does not exist.\n", $name );
+                return;
+            }
+            push @$items, { nameID => $item->{nameID}, index => $item->{index}, price => $price, amount => $amount };
+        }
+
+        $messageSender->sendOpenBuyerShop( $title, $items );
+    } elsif ( $cmd eq 'close' ) {
+        $messageSender->sendCloseBuyerShop;
+    } else {
+        error TF( "Error in function 'buyershop'\n" . "Usage: buyershop open <title> <item1=price,amount> <item2=price,amount> ...\n" );
+        return;
+
+    }
+}
 
 sub cmdVerbose {
 	if ($config{'verbose'}) {
@@ -5786,13 +5947,13 @@ sub cmdAuction {
 }
 
 sub cmdQuest {
-	if (!$net || $net->getState() != Network::IN_GAME) {
-		error TF("You must be logged in the game to use this command '%s'\n", shift);
-		return;
-	}
 	my ($cmd, $args_string) = @_;
 	my @args = parseArgs($args_string, 3);
 	if ($args[0] eq 'set') {
+		if (!$net || $net->getState() != Network::IN_GAME) {
+			error TF("You must be logged in the game to use this command (%s)\n", $cmd);
+			return;
+		}
 		if ($args[1] =~ /^\d+/) {
 			# note: we need the questID here now, might be better if we could make it so you only have to insert some questIndex
 			$messageSender->sendQuestState($args[1], ($args[2] eq 'on'));
@@ -5802,19 +5963,46 @@ sub cmdQuest {
 	} elsif ($args[0] eq 'list') {
 		my $k = 0;
 		my $msg .= center(" " . T("Quest List") . " ", 79, '-') . "\n";
-		foreach my $questID (keys %{$questList}) {
-			my $quest = $questList->{$questID};
-			$msg .= swrite(sprintf("\@%s \@%s \@%s \@%s \@%s", ('>'x2), ('<'x4), ('<'x30), ('<'x10), ('<'x24)),
-				[$k, $questID, $quests_lut{$questID} ? $quests_lut{$questID}{title} : '', $quest->{active} ? T("active") : T("inactive"), $quest->{time} ? scalar localtime $quest->{time} : '']);
-			foreach my $mobID (keys %{$quest->{missions}}) {
-				my $mission = $quest->{missions}->{$mobID};
-				$msg .= swrite(sprintf("\@%s \@%s \@%s", ('>'x2), ('<'x30), ('<'x30)),
-					[" -", $mission->{mobName}, sprintf(defined $mission->{goal} ? '%d/%d' : '%d', @{$mission}{qw(count goal)})]);
-			}
+		my $fmt = sprintf '@%s @%s @%s @%s @%s', ('>'x2), ('<'x7), ('<'x28), ('<'x10), ('<'x38);
+		$msg .= swrite($fmt, ['', 'Quest ID', 'Title', 'State', 'Timer/Monster Count']);
+		foreach my $questID (sort { $a <=> $b } keys %{$questList}) {
 			$k++;
+			next if existsInList( $config{hiddenQuests}, $questID );
+			my $quest = $questList->{$questID};
+			my $title = $quests_lut{$questID}{title} || '';
+			my $state = $quest->{active} ? T('active') : T('inactive');
+			my $extra = '';
+			$extra = scalar localtime $quest->{time} if $quest->{time};
+			my @missions = map {
+				my $count = sprintf( ( $_->{goal} ? '%d/%d' : '%d' ), @{$_}{qw(count goal)} );
+				sprintf( '%-7s %s', $count, $_->{mobName} );
+			} sort { $a->{mobName} cmp $b->{mobName} } values %{ $quest->{missions} };
+			$extra ||= shift @missions;
+			$msg .= swrite($fmt, [$k, $questID, $title, $state, $extra]);
+			foreach my $mission ( @missions ) {
+				$msg .= swrite( $fmt, [ '', '', '', '', $mission ] );
+			}
 		}
 		$msg .= sprintf("%s\n", ('-'x79));
 		message $msg, "list";
+	} elsif ($args[0] eq 'hide') {
+		if ($args[1] =~ /^\d+$/ && $args[1] < 1000) {
+			$args[1] = (keys %$questList)[$args[1] - 1];
+		}
+		if ($args[1] =~ /^\d+$/ && $quests_lut{$args[1]}) {
+			configModify('hiddenQuests', join ',', sort { $a <=> $b } grep {$_} keys %{ { map { $_ => 1 } $args[1], split ',', $config{hiddenQuests} } });
+		} else {
+			message T("Unknown quest\n"), "info";
+		}
+	} elsif ($args[0] eq 'show') {
+		if ($args[1] =~ /^\d+$/ && $args[1] < 1000) {
+			$args[1] = (keys %$questList)[$args[1] - 1];
+		}
+		if ($args[1] =~ /^\d+$/ && $quests_lut{$args[1]}) {
+			configModify( 'hiddenQuests', join ',', grep { $_ ne $args[1] } split ',', $config{hiddenQuests} );
+		} else {
+			message T("Unknown quest\n"), "info";
+		}
 	} elsif ($args[0] eq 'info') {
 		if ($args[1] =~ /^\d+/) {
 			# note: we need the questID here now, might be better if we could make it so you only have to insert some questIndex
@@ -5864,7 +6052,7 @@ sub cmdCooking {
 	}
 	my ($cmd, $arg) = @_;
 	if ($arg =~ /^\d+/ && defined $cookingList->[$arg]) { # viewID/nameID can be 0
-		$messageSender->sendCooking(1, $cookingList->[$arg]); # type 1 is for cooking
+		$messageSender->sendCooking(4, $cookingList->[$arg]); # type 1 is for cooking
 	} else {
 		message TF("Item with 'Cooking List' index: %s not found.\n", $arg), "info";
 	}

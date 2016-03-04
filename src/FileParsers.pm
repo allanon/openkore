@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8754 $
+#  $Id: FileParsers.pm 8754 2013-11-30 19:57:50Z marcelofoxes $
 #
 #########################################################################
 ##
@@ -42,6 +42,7 @@ our @EXPORT = qw(
 	parseConfigFile
 	parseDataFile
 	parseDataFile_lc
+	parseDataFile_multiValue_lc
 	parseDataFile2
 	parseEmotionsFile
 	parseItemsControl
@@ -70,7 +71,6 @@ our @EXPORT = qw(
 	writeSectionedFileIntact
 	updateMonsterLUT
 	updatePortalLUT
-	updatePortalLUT2
 	updateNPCLUT
 );
 
@@ -285,6 +285,7 @@ sub parseConfigFile {
 					}
 				}
 				if (-f $f) {
+				    Log::message( TF("Loading included %s...\n", $f) );
 					my $ret = parseConfigFile($f, $r_hash, 1, $blocks);
 					return $ret unless $ret;
 				} else {
@@ -367,6 +368,47 @@ sub parseDataFile_lc {
 		}
 	}
 	return 1;
+}
+
+sub parseDataFile_multiValue_lc {
+    my ( $file, $r_hash, $fields, $regex_hash ) = @_;
+    undef %$r_hash;
+    undef %$regex_hash if $regex_hash;
+    my $reader = new Utils::TextReader( $file );
+    while ( !$reader->eof ) {
+        my $line = $reader->readLine();
+        $line =~ s/\x{FEFF}//go;
+        $line =~ s/^\s+|\s+$//gos;
+        next if $line =~ /^#/o;
+
+		if ( $line =~ /^!include\s+(.*?)\s*$/os ) {
+			# Process special !include directives
+			# The filename can be relative to the current file
+			my $f = $1;
+			if (!File::Spec->file_name_is_absolute($f) && $f =~ m{^[^/].*[/\\]}) {
+				my ($f2) = $file =~ m{^(.*)/}os;
+				$f = File::Spec->rel2abs($f, $f2);
+			}
+			if (-f $f) {
+				Log::message Translation::TF("Loading %s...\n", $f);
+				parseDataFile_multiValue_lc($f, $r_hash, $fields, $regex_hash);
+			} else {
+				error Translation::TF("%s: Include file not found: %s\n", $file, $f);
+			}
+			next;
+		}
+
+        if ( $regex_hash && $line =~ m{^/(.*)/\s+(-?\d+.*)}o ) {
+            my ( $key, $values ) = ( $1, $2 );
+            my @values = split /\s+/, $values;
+            $regex_hash->{ lc $key }->{ $fields->[$_] } = $values[$_] foreach 0 .. $#values;
+        } elsif ( $line =~ /^(\S.*?)\s+(-?\d+(\s|$).*)/o ) {
+            my ( $key, $values ) = ( $1, $2 );
+            my @values = split /\s+/, $values;
+            $r_hash->{ lc $key }->{ $fields->[$_] } = $values[$_] foreach 0 .. $#values;
+        }
+    }
+    return 1;
 }
 
 sub parseDataFile2 {
@@ -487,25 +529,45 @@ sub parseShopControl {
 }
 
 sub parseItemsControl {
-	my ($file, $r_hash) = @_;
-	undef %{$r_hash};
-	my ($key, $args_text, %cache);
+	my ($file, $r_hash, $cache) = @_;
+	undef %{$r_hash} if !$cache;
+	$cache ||= {};
+	my ($key, $args_text);
 	
 	my $reader = new Utils::TextReader($file);
 	until ($reader->eof) {
 		$_ = lc $reader->readLine;
 		next if /^#/;
+
+		if (/^!include\s+(.*?)\s*$/os) {
+			# Process special !include directives
+			# The filename can be relative to the current file
+			my $f = $1;
+			if (!File::Spec->file_name_is_absolute($f) && $f =~ m{^[^/].*[/\\]}) {
+				my ($f2) = $file =~ m{^(.*)/}os;
+				$f = File::Spec->rel2abs($f, $f2);
+			}
+			if (-f $f) {
+				parseItemsControl($f, $r_hash, $cache);
+			} else {
+				error Translation::TF("%s: Include file not found: %s\n", $file, $f);
+			}
+			next;
+		}
+
 		if (($key, $args_text) = extract_delimited and $key) {
 			$key =~ s/^.|.$//g;
 			$args_text =~ s/^\s+//;
 		} else {
-			($key, $args_text) = /([\s\S]+?)\s(\d+[\s\S]*)/;
+			($key, $args_text) = /([\s\S]+?)\s+(\d+[\s\S]*)/;
 		}
 		
 		next if $key =~ /^$/;
 		my @args = split /\s+/, $args_text;
+
 		# Cache similar entries to save memory.
-		$r_hash->{$key} = $cache{$args_text} ||= { map {$_ => shift @args} qw(keep storage sell cart_add cart_get) };
+		$r_hash->{$key} = $cache->{$args_text} ||= { map {$_ => shift @args} qw(keep storage sell cart_add cart_get) };
+
 	}
 	return 1;
 }
@@ -533,8 +595,14 @@ sub parseNPCs {
 sub parseMonControl {
 	my $file = shift;
 	my $r_hash = shift;
-	undef %{$r_hash};
+	my $cache = shift;
+	undef %{$r_hash} if !$cache;
 	my ($key,@args,$args);
+
+    my @arg_names = qw(
+		attack_auto teleport_auto teleport_search skillcancel_auto
+		attack_lvl attack_jlvl attack_hp attack_sp weight
+	);
 
 	my $reader = new Utils::TextReader($file);
 	while (!$reader->eof()) {
@@ -547,20 +615,34 @@ sub parseMonControl {
 		if ($line =~ /\t/) {
 			($key, $args) = split /\t+/, lc($line);
 		} else {
-			($key, $args) = lc($line) =~ /([\s\S]+?) ([\-\d\.]+[\s\S]*)/;
+			($key, $args) = lc($line) =~ /^(.+?)\s+([\s\d.-]+)/;
 		}
 
+		if ($line =~ /^!include\s+(.*?)\s*$/os) {
+			# Process special !include directives
+			# The filename can be relative to the current file
+			my $f = $1;
+			if (!File::Spec->file_name_is_absolute($f) && $f =~ m{^[^/].*[/\\]}) {
+				my ($f2) = $file =~ m{^(.*)/}os;
+				$f = File::Spec->rel2abs($f, $f2);
+			}
+			if (-f $f) {
+				Log::message Translation::TF("Loading %s...\n", $f);
+				parseMonControl($f, $r_hash, 1);
+			} else {
+				error Translation::TF("%s: Include file not found: %s\n", $file, $f);
+			}
+			next;
+		}
+
+		next if !$key;
+
 		@args = split / /, $args;
-		if ($key ne "") {
-			$r_hash->{$key}{attack_auto} = $args[0];
-			$r_hash->{$key}{teleport_auto} = $args[1];
-			$r_hash->{$key}{teleport_search} = $args[2];
-			$r_hash->{$key}{skillcancel_auto} = $args[3];
-			$r_hash->{$key}{attack_lvl} = $args[4];
-			$r_hash->{$key}{attack_jlvl} = $args[5];
-			$r_hash->{$key}{attack_hp} = $args[6];
-			$r_hash->{$key}{attack_sp} = $args[7];
-			$r_hash->{$key}{weight} = $args[8];
+		foreach (0..$#arg_names) {
+			next if $args[$_] eq '';
+			my $old = $r_hash->{$key}{$arg_names[$_]};
+			$r_hash->{$key}{$arg_names[$_]} = $args[$_];
+			my $new = $r_hash->{$key}{$arg_names[$_]};
 		}
 	}
 	return 1;
@@ -579,16 +661,25 @@ sub parsePortals {
 		$line =~ s/^\s+|\s+$//g;
 		$line =~ s/(.*)[\s\t]+#.*$/$1/;
 		
-		if ($line =~ /^([\w|@|-]+)\s(\d{1,3})\s(\d{1,3})\s([\w|@|-]+)\s(\d{1,3})\s(\d{1,3})\s?(.*)/) {
-		my ($source_map, $source_x, $source_y, $dest_map, $dest_x, $dest_y, $misc) = ($1, $2, $3, $4, $5, $6, $7);
+		if ($line =~ /^([\w@:-]+)\s(\d{1,3})\s(\d{1,3})(?:\sid=(\d+))?\s([\w@-]+)\s(\d{1,3})\s(\d{1,3})\s?(.*)/) {
+		my ($source_map, $source_x, $source_y, $nameID, $dest_map, $dest_x, $dest_y, $misc) = ($1, $2, $3, $4, $5, $6, $7, $8);
+			# Allow us to stand more or less than 10 tiles (the default) away from the NPC.
+			my $dist = 10;
+			if ( $source_map =~ m{^(.*):(.*)$} ) {
+			    $dist = $2;
+			    $source_map = $1;
+			}
+
 			my $portal = "$source_map $source_x $source_y";
 			my $dest = "$dest_map $dest_x $dest_y";
 			$$r_hash{$portal}{'source'}{'map'} = $source_map;
 			$$r_hash{$portal}{'source'}{'x'} = $source_x;
 			$$r_hash{$portal}{'source'}{'y'} = $source_y;
+			$$r_hash{$portal}{'source'}{'nameID'} = $nameID;
 			$$r_hash{$portal}{'dest'}{$dest}{'map'} = $dest_map;
 			$$r_hash{$portal}{'dest'}{$dest}{'x'} = $dest_x;
 			$$r_hash{$portal}{'dest'}{$dest}{'y'} = $dest_y;
+			$$r_hash{$portal}{'dest'}{$dest}{'dist'} = $dist;
 			$$r_hash{$portal}{dest}{$dest}{enabled} = 1; # is available permanently (can be used when calculating a route)
 			#$$r_hash{$portal}{dest}{$dest}{active} = 1; # TODO: is available right now (otherwise, wait until it becomes available)
 			if ($misc =~ /^(\d+)\s(\d)\s(.*)$/) { # [cost] [allow_ticket] [talk sequence]
@@ -637,6 +728,7 @@ sub parsePriority {
 	my $file = shift;
 	my $r_hash = shift;
 	return unless my $reader = new Utils::TextReader($file);
+	undef %$r_hash;
 
 	my @lines;
 	while (!$reader->eof()) {
@@ -1324,14 +1416,6 @@ sub updatePortalLUT {
 	my ($file, $src, $x1, $y1, $dest, $x2, $y2) = @_;
 	open FILE, ">>:utf8", $file;
 	print FILE "$src $x1 $y1 $dest $x2 $y2\n";
-	close FILE;
-}
-
-#Add: NPC talk Sequence
-sub updatePortalLUT2 {
-	my ($file, $src, $x1, $y1, $dest, $x2, $y2, $seq) = @_;
-	open FILE, ">>:utf8", $file;
-	print FILE "$src $x1 $y1 $dest $x2 $y2 $seq\n";
 	close FILE;
 }
 

@@ -22,7 +22,7 @@ use IO::Socket;
 use Time::HiRes qw(time sleep);
 use POSIX;
 use bytes;
-no encoding 'utf8';
+no utf8;
 
 use Globals qw(%consoleColors);
 use Interface;

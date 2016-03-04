@@ -94,6 +94,12 @@ sub args {
 	return \%{$ai_seq_args[$i]};
 }
 
+sub remove {
+	my $i = defined $_[0] ? $_[0] : 0;
+	splice @ai_seq, $i, 1;
+	splice @ai_seq_args, $i, 1;
+}
+
 sub dequeue {
 	shift @ai_seq;
 	shift @ai_seq_args;
@@ -103,6 +109,8 @@ sub queue {
 	unshift @ai_seq, shift;
 	my $args = shift;
 	unshift @ai_seq_args, ((defined $args) ? $args : {});
+	Plugins::callHook( 'AI::queue' );
+	scalar @ai_seq
 }
 
 sub clear {
@@ -238,7 +246,7 @@ sub ai_partyfollow {
 		$master{y} = $char->{party}{users}{$master{id}}{pos}{y};
 		($master{map}) = $char->{party}{users}{$master{id}}{map} =~ /([\s\S]*)\.gat/;
 
-		if ($master{map} ne $field->name || $master{x} == 0 || $master{y} == 0) { # Compare including InstanceID
+		if ($master{map} ne $field->baseName || $master{x} == 0 || $master{y} == 0) { # Compare including InstanceID
 			delete $master{x};
 			delete $master{y};
 		}
@@ -247,25 +255,47 @@ sub ai_partyfollow {
 
 		# Compare map names including InstanceID
 		if ((exists $ai_v{master} && distance(\%master, $ai_v{master}) > 15)
-			|| $master{map} != $ai_v{master}{map}
+			|| $master{map} ne $ai_v{master}{map}
 			|| (timeOut($ai_v{master}{time}, 15) && distance(\%master, $char->{pos_to}) > $config{followDistanceMax})) {
 
 			$ai_v{master}{x} = $master{x};
 			$ai_v{master}{y} = $master{y};
 			$ai_v{master}{map} = $master{map};
-			($ai_v{master}{map_name}, undef) = Field::nameToBaseName(undef, $master{map}); # Hack to clean up InstanceID
+			($ai_v{master}{map_name}, undef) = Field::nameToBaseName(undef, $master{map}) if $master{map}; # Hack to clean up InstanceID
 			$ai_v{master}{time} = time;
 
-			if ($ai_v{master}{map} ne $field->name) {
+			if ($field->isCity && AI::is('sitAuto')) {
+				# Wait until our HP is restored before charging into a potentially deadly situation.
+				return;
+			} elsif ($ai_v{master}{map_name} ne $field->baseName) {
+#				message "Calculating route to find master: $ai_v{master}{map_name} ($ai_v{master}{map}) (my map is [$field], [".$field->baseName."], [$field->{createdWith}])\n";
 				message TF("Calculating route to find master: %s\n", $ai_v{master}{map_name}), "follow";
+#use Carp qw(&longmess);
+#message longmess();
 			} elsif (distance(\%master, $char->{pos_to}) > $config{followDistanceMax} ) {
 				message TF("Calculating route to find master: %s (%s,%s)\n", $ai_v{master}{map_name}, $ai_v{master}{x}, $ai_v{master}{y}), "follow";
 			} else {
 				return;
 			}
 
+            if ( !$ai_v{master}{map_name} && !( $ai_v{master}{x} && $ai_v{master}{y} ) ) {
+                message "Master map and location are both unset!\n";
+                return;
+            }
+
 			AI::clear("move", "route", "mapRoute");
-			ai_route($ai_v{master}{map_name}, $ai_v{master}{x}, $ai_v{master}{y}, distFromGoal => $config{followDistanceMin});
+			my $pos  = calcPosition($char);
+			my $dist = distance($pos, $ai_v{master});
+			if ($dist > 15) {
+#Log::message("party follow dist %d: route to %d,%d\n", $dist, $ai_v{master}{x}, $ai_v{master}{y});
+				ai_route($ai_v{master}{map_name}, $ai_v{master}{x}, $ai_v{master}{y}, distFromGoal => $config{followDistanceMin});
+			} else {
+				my (%vec, %to);
+				getVector(\%vec, $ai_v{master}, $pos);
+				moveAlongVector(\%to, $pos, \%vec, $dist - $config{followDistanceMin});
+#Log::message("party follow dist %d: move to %d,%d\n", $dist, $to{x}, $to{y});
+				$char->sendMove(@to{qw(x y)});
+			}
 
 			my $followIndex = AI::findAction("follow");
 			if (defined $followIndex) {
@@ -437,6 +467,7 @@ sub ai_mapRoute_searchStep {
 					$arg{'walk'} = $$r_args{'closelist'}{$this}{'walk'};
 					$arg{'zeny'} = $$r_args{'closelist'}{$this}{'zeny'};
 					$arg{'steps'} = $portals_lut{$from}{'dest'}{$to}{'steps'};
+					$arg{'dist'} = $portals_lut{$from}{'dest'}{$to}{'dist'};
 					unshift @{$$r_args{'mapSolution'}},\%arg;
 					$this = $$r_args{'closelist'}{$this}{'parent'};
 				}

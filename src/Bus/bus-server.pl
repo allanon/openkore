@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8850 $
+#  $Id: bus-server.pl 8850 2014-03-17 12:45:44Z marcelofoxes $
 #
 #########################################################################
 # OpenKore Bus Server

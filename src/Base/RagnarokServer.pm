@@ -8,7 +8,7 @@ use Base::Server;
 use base qw(Base::Server);
 use Network::MessageTokenizer;
 use Utils::Exceptions;
-use Globals qw($masterServer);
+use Globals qw($masterServer %config);
 use Misc;
 use Log qw(debug);
 
@@ -55,6 +55,7 @@ sub onClientData {
 	my ($self, $client, $data) = @_;
 	$client->{tokenizer}->add($data);
 	
+	Misc::visualDump($data, ">> Received packet(s) (server)") if length $data && $config{debugPacket_received};
 	$client->{outbox} && $client->{outbox}->add($_) for $self->{sendPacketParser}->process(
 		$client->{tokenizer}, $self, $client
 	);

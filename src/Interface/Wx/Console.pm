@@ -15,8 +15,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8015 $
+#  $Id: Console.pm 8015 2012-04-29 10:05:52Z farrainbow $
 #
 #########################################################################
 ##

@@ -24,7 +24,7 @@ no warnings 'redefine';
 use Time::HiRes qw(usleep);
 use IO::Socket;
 use bytes;
-no encoding 'utf8';
+no utf8;
 
 use Modules 'register';
 use Globals qw(%consoleColors);

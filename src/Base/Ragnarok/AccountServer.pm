@@ -121,18 +121,21 @@ sub master_login {
 		$client->close();
 
 	} elsif ($result == ACCOUNT_NOT_FOUND) {
+		Log::message("Account login failed: account not found.\n");
 		$client->send($self->{recvPacketParser}->reconstruct({
 			switch => 'login_error',
 			type => Network::Receive::ServerType0::REFUSE_INVALID_ID,
 		}));
 		$client->close();
 	} elsif ($result == PASSWORD_INCORRECT) {
+		Log::message("Account login failed: password incorrect.\n");
 		$client->send($self->{recvPacketParser}->reconstruct({
 			switch => 'login_error',
 			type => Network::Receive::ServerType0::REFUSE_INVALID_PASSWD,
 		}));
 		$client->close();
 	} elsif ($result == ACCOUNT_BANNED) {
+		Log::message("Account login failed: account banned.\n");
 		$client->send($self->{recvPacketParser}->reconstruct({
 			switch => 'login_error',
 			type => Network::Receive::ServerType0::REFUSE_NOT_CONFIRMED,

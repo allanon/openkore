@@ -15,8 +15,8 @@
 #  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #  GNU General Public License for more details.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7774 $
+#  $Id: Vx.pm 7774 2011-06-13 06:23:05Z windhamwong $
 #
 #########################################################################
 

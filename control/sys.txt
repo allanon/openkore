@@ -1,9 +1,6 @@
 ###### Localization settings ######
 locale
 
-###### Localization compatibility ######
-# Enable to make Kore compatible with old 2.0 configs.
-locale_compat 0
 
 ###### Wx interface settings ######
 wxHideConsole 1
@@ -17,7 +14,6 @@ bus 0
 # computer, specify the host and port here.
 bus_server_host
 bus_server_port
-bus_userAgent
 
 
 ###### Vx interface settings ######
@@ -44,7 +40,7 @@ panelTwo_fontsize 8
 #   1 : load all plugins
 #   2 : only load plugins that are listed in loadPlugins_list
 #   3 : load all plugins except those listed in skipPlugins_list
-loadPlugins 2
+loadPlugins 1
 
 # loadPlugins_list <list>
 #   if loadPlugins is set to 2, this comma-separated list of plugin names (filename without the extension)
@@ -57,4 +53,4 @@ loadPlugins_list macro
 skipPlugins_list
 
 ###### Miscellaneous ######
-sendAnonymousStatisticReport 0
+sendAnonymousStatisticReport 1

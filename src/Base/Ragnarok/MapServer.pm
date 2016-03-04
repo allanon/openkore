@@ -2,7 +2,7 @@ package Base::Ragnarok::MapServer;
 
 use strict;
 use Time::HiRes qw(time);
-no encoding 'utf8';
+no utf8;
 use bytes;
 
 use Modules 'register';

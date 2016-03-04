@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8896 $
+#  $Id: Send.pm 8896 2014-08-23 01:27:13Z ya4ept $
 #
 #########################################################################
 ##
@@ -22,6 +22,9 @@
 # Please also read <a href="http://wiki.openkore.com/index.php/Network_subsystem">the
 # network subsystem overview.</a>
 package Network::Send;
+
+# Resolve a circular dependency by loading Misc first.
+use Misc;
 
 use strict;
 use Network::PacketParser; # import
@@ -328,12 +331,14 @@ sub sendToServer {
 	$bytesSent += length($msg);
 	
 	if ($config{debugPacket_sent} && !existsInList($config{debugPacket_exclude}, $messageID) && $config{debugPacket_include_dumpMethod} < 3) {
-		my $label = $packetDescriptions{Send}{$messageID} ?
-			"[$packetDescriptions{Send}{$messageID}]" : '';
+		my $label = 
+			$packetDescriptions{Send}{$messageID} ? $packetDescriptions{Send}{$messageID} :
+			$self->{packet_list}{$messageID} ? $self->{packet_list}{$messageID}[0] :
+			'';
 		if ($config{debugPacket_sent} == 1) {
-			debug(sprintf("Sent packet    : %-4s    [%2d bytes]  %s\n", $messageID, length($msg), $label), "sendPacket", 0);
+			debug(sprintf("%-20s: %-4s [%3d bytes] %s\n", '>> Sent packet', $messageID, length($msg), $label), "sendPacket", 0);
 		} else {
-			Misc::visualDump($msg, ">> Sent packet: $messageID  $label");
+			Misc::visualDump($msg, sprintf('%-20s: %-4s %s', '>> Sent packet', $messageID, $label));
 		}
 	}
 	
@@ -617,14 +622,14 @@ sub sendGetCharacterName {
 
 sub sendTalk {
 	my ($self, $ID) = @_;
-	$talk{msg} = $talk{image} = '';
+	$talk{msg} = '';
 	$self->sendToServer($self->reconstruct({switch => 'npc_talk', ID => $ID, type => 1}));
 	debug "Sent talk: ".getHex($ID)."\n", "sendPacket", 2;
 }
 
 sub sendTalkCancel {
 	my ($self, $ID) = @_;
-	$talk{msg} = $talk{image} = '';
+	$talk{msg} = '';
 	$self->sendToServer($self->reconstruct({switch => 'npc_talk_cancel', ID => $ID}));
 	debug "Sent talk cancel: ".getHex($ID)."\n", "sendPacket", 2;
 }
@@ -637,21 +642,21 @@ sub sendTalkContinue {
 
 sub sendTalkResponse {
 	my ($self, $ID, $response) = @_;
-	$talk{msg} = $talk{image} = '';
+	$talk{msg} = '';
 	$self->sendToServer($self->reconstruct({switch => 'npc_talk_response', ID => $ID, response => $response}));
 	debug "Sent talk respond: ".getHex($ID).", $response\n", "sendPacket", 2;
 }
 
 sub sendTalkNumber {
 	my ($self, $ID, $number) = @_;
-	$talk{msg} = $talk{image} = '';
+	$talk{msg} = '';
 	$self->sendToServer($self->reconstruct({switch => 'npc_talk_number', ID => $ID, value => $number}));
 	debug "Sent talk number: ".getHex($ID).", $number\n", "sendPacket", 2;
 }
 
 sub sendTalkText {
 	my ($self, $ID, $input) = @_;
-	$talk{msg} = $talk{image} = '';
+	$talk{msg} = '';
 	$input = stringToBytes($input);
 	$self->sendToServer($self->reconstruct({
 		switch => 'npc_talk_text',
@@ -699,12 +704,6 @@ sub sendDrop {
 	my ($self, $index, $amount) = @_;
 	$self->sendToServer($self->reconstruct({switch => 'item_drop', index => $index, amount => $amount}));
 	debug "Sent drop: $index x $amount\n", "sendPacket", 2;
-}
-
-sub sendItemUse {
-	my ($self, $index, $targetID) = @_;
-	$self->sendToServer($self->reconstruct({switch => 'item_use', index => $index, targetID => $targetID}));
-	debug "Item Use: $index\n", "sendPacket", 2;
 }
 
 # for old plugin compatibility, use sendRestart instead!
@@ -806,7 +805,7 @@ sub sendBuyBulkBuyer {
 	#FIXME not working yet
 	#field index still wrong and remain unknown
 	my ($self, $buyerID, $r_array, $buyingStoreID) = @_;
-	my $msg = pack('v2', 0x0819, 12+6*@{$r_array});
+	my $msg = pack('v2', 0x0819, 4+8*@{$r_array});
 	$msg .= pack ('a4 a4', $buyerID, $buyingStoreID);
 	for (my $i = 0; $i < @{$r_array}; $i++) {
 		debug 'Send Buying Buyer Request: '.$r_array->[$i]{itemIndex}.' '.$r_array->[$i]{itemID}.' '.$r_array->[$i]{amount}."\n", "sendPacket", 2;
@@ -1188,23 +1187,6 @@ sub sendEquip {
 		)
 	);
 	debug "Sent Equip: $index Type: $type\n" , 2;
-}
-
-sub sendProgress {
-	my ($self) = @_;
-	my $msg = pack("C*", 0xf1, 0x02);
-	$self->sendToServer($msg);
-	debug "Sent Progress Bar Finish\n", "sendPacket", 2;
-}
-
-sub sendProduceMix {
-	my ($self, $ID,
-		# nameIDs for added items such as Star Crumb or Flame Heart
-		$item1, $item2, $item3) = @_;
-
-	my $msg = pack('v5', 0x018E, $ID, $item1, $item2, $item3);
-	$self->sendToServer($msg);
-	debug "Sent Forge, Produce Item: $ID\n" , 2;
 }
 
 1;

@@ -702,6 +702,10 @@ sub dumpHash {
 		}
 		chop $out;
 		$out .= "]";
+	} elsif (eval { $buf->can('dumpArgs') }) {
+	    $out .= $buf->dumpArgs;
+	} else {
+	    $out .= "$buf";
 	}
 	$out = '{empty}' if ($out eq '}');
 	return $out;

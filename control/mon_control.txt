@@ -16,9 +16,8 @@
 # < 0 (-1, -2, etc.) to set exact critical distance for this monster. Teleport, if the monster reaches it.
 # 1 to teleport if the monster is on the screen.
 # 2 to teleport if the monster attacks you.
-#  -> This is only used in auto-attack mode!
-# 3 to disconnect for 30 seconds if the monster is on your screen.
-# >= 4 (4, 5, etc.) to set the time that will be disconnected (in seconds) if the monster is on your screen.
+# 3 to disconnect if the monster is on your screen.
+# This is only used in auto-attack mode.
 #
 # <search>: Put a 1 to only attack the monster in the search mode.
 # This is only used in auto-attack mode.
@@ -57,6 +56,15 @@
 # Monsters not found in this file, or flags not specified will default to:
 # <attack> = 1
 
+Poring 1
+Willow 1
+Spore 0
+Creamy 0
+
+Santa Poring 2
+Antonio 2
+Gift Stealing Raccoon 2
+Socks Stealing Raccoon 2
 
 ##### Eggs #####
 Ant's Egg 0 0 0
@@ -82,11 +90,11 @@ Thief Bug's Egg 0 0 0
 
 ##### Plants #####
 Black Mushroom 0 0 0
-Blue Plant 0 0 0
+Blue Plant 1 0 0
 Green Plant 0 0 0
 Red Mushroom 0 0 0
 Red Plant 0 0 0
-Shining Plant 0 0 0
+Shining Plant 1 0 0
 White Plant 0 0 0
 Yellow Plant 0 0 0
 
@@ -142,17 +150,11 @@ Yellow Plant 0 0 0
 6046 -1 0 0
 
 ##### Monster Mercenary #####
-# Mimic (Monster)
 1191 -1 0 0
-# Disguise (Monster)
 1506 -1 0 0
-# Alice (Monster)
 1275 -1 0 0
-# Wild Rose (Mercenary version, M_WILD_ROSE)
 1965 -1 0 0
-# Doppelganger (Mercenary version, M_DOPPELGANGER)
 1966 -1 0 0
-# Egnigem Cenia (Mercenary version, M_YGNIZEM)
 1967 -1 0 0
 
 ##### MVPs and Dangerous Monsters #####

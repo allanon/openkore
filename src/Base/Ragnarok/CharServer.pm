@@ -369,6 +369,13 @@ sub char_delete {
 	$client->send(pack('C*', 0x70, 0x00, 1));
 }
 
+sub process_07E5 {
+	# Character creation.
+	my ($self, $client) = @_;
+	# Deny it.
+	$client->send(pack('vvC', 0x07E9, 5, 1));
+}
+
 sub unhandledMessage {
 	my ($self, $args, $client) = @_;
 	$client->close();

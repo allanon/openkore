@@ -69,7 +69,7 @@ sub new {
 	my $self = $class->SUPER::new(@_);
 
 	if (!$args{map}) {
-		ArgumentException->throw(error => "Invalid arguments.");
+		ArgumentException->throw(error => "Task::CalcMapRoute: Invalid arguments.");
 	}
 
 	$self->{source}{field} = defined($args{sourceMap}) ? Field->new(name => $args{sourceMap}) : $field;
@@ -221,13 +221,9 @@ sub searchStep {
 			delete $openlist->{$parent};
 			next;
 		} else {
+#Log::message("closing $parent :: $openlist->{$parent}->{parent} $openlist->{$parent}->{walk} $openlist->{$parent}->{zeny} $openlist->{$parent}->{allow_ticket}\n");
 			# MOVE this entry into the CLOSELIST
-			$closelist->{$parent}{walk}   = $openlist->{$parent}{walk};
-			$closelist->{$parent}{zeny}  = $openlist->{$parent}{zeny};
-			$closelist->{$parent}{allow_ticket}  = $openlist->{$parent}{allow_ticket};
-			$closelist->{$parent}{parent} = $openlist->{$parent}{parent};
-			# Then delete in from OPENLIST
-			delete $openlist->{$parent};
+			$closelist->{$parent} = delete $openlist->{$parent};
 		}
 
 		if ($portals_lut{$portal}{dest}{$dest}{map} eq $self->{dest}{map}) {
@@ -246,6 +242,7 @@ sub searchStep {
 					$arg{zeny} = $closelist->{$this}{zeny};
 					$arg{allow_ticket} = $closelist->{$this}{allow_ticket};
 					$arg{steps} = $portals_lut{$from}{dest}{$to}{steps};
+					$arg{dist} = $portals_lut{$from}{dest}{$to}{dist};
 
 					unshift @{$self->{mapSolution}}, \%arg;
 					$this = $closelist->{$this}{parent};
@@ -271,6 +268,7 @@ sub searchStep {
 					$arg{zeny} = $closelist->{$this}{zeny};
 					$arg{allow_ticket} = $closelist->{$this}{allow_ticket};
 					$arg{steps} = $portals_lut{$from}{dest}{$to}{steps};
+					$arg{dist} = $portals_lut{$from}{dest}{$to}{dist};
 
 					unshift @{$self->{mapSolution}}, \%arg;
 					$this = $closelist->{$this}{parent};
@@ -295,6 +293,8 @@ sub searchStep {
 						$openlist->{"$child=$subchild"}{walk} = $thisWalk;
 						$openlist->{"$child=$subchild"}{zeny} = $closelist->{$parent}{zeny} + $portals_lut{$child}{dest}{$subchild}{cost};
 						$openlist->{"$child=$subchild"}{allow_ticket} = $closelist->{$parent}{allow_ticket};
+#my $parent = "$child=$subchild";
+#Log::message("opening $parent :: $openlist->{$parent}->{parent} $openlist->{$parent}->{walk} $openlist->{$parent}->{zeny} $openlist->{$parent}->{allow_ticket}\n");
 					}
 				}
 			}

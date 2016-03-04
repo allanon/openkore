@@ -20,6 +20,8 @@ sub addSlave {
 	$actor->{slave_skillsID} = [];
 	$actor->{slave_AI} = AI::AUTO;
 
+# ETHAN: HACK: homunculus isn't getting the right type pretty often, and intimacy is suffering. Try to band-aid it.
+$actor->{actorType} = 'Homunculus' if $actor->{actorType} ne 'Mercenary';
 	if ($actor->{actorType} eq 'Homunculus') {
 		$actor->{configPrefix} = 'homunculus_';
 		bless $actor, 'AI::Slave::Homunculus';

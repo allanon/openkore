@@ -1,8 +1,7 @@
+poseidon.pl
 Client.pm
 Config.pm
 EmbedServer.pm
-poseidon.pl
-QueryServer.pm
 RagnarokServer.pm
-servertypes.txt
+QueryServer.pm
 TECHNICAL.TXT

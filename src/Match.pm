@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 6864 $
+#  $Id: Match.pm 6864 2009-08-24 17:23:45Z Technologyguild $
 #
 #########################################################################
 ##

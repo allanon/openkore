@@ -157,10 +157,17 @@ sub addToReloadQueue2 {
 sub checkSyntax {
 	my ($file) = @_;
 	my (undef, undef, $baseName) = File::Spec->splitpath($file);
-	system($Config{perlpath},
-		'-I', "$FindBin::RealBin/src",
-		'-I', "$FindBin::RealBin/src/deps",
-		'-c', $file);
+    my $result = backticks(    #
+        [   $Config{perlpath},
+            '-I' => "$FindBin::RealBin/src",
+            '-I' => "$FindBin::RealBin/src/deps",
+            '-c' => $file
+        ],
+        1,
+    );
+    if ( $result ) {
+        Log::message( "$_\n" ) foreach split /[\r\n]+/, $result;
+    }
 	if ($? == -1) {
 		error(TF("Failed to execute %s\n", $Config{perlpath}));
 		return 0;
@@ -174,6 +181,30 @@ sub checkSyntax {
 		error(TF("%s contains syntax errors.\n", $baseName));
 		return 0;
 	}
+}
+
+##
+# String Modules::backticks(String[] command, boolean include_stderr)
+#
+# Run the command and capture STDOUT and (optionally) STDERR in a single string.
+# Unlike the built-in backticks operator (``), this function 
+# does not need shell escaping.
+sub backticks {
+    my ( $cmd, $include_stderr ) = @_;
+
+    my $pid = open( my $fp, '-|' );
+
+    if ( !$pid ) {
+        ( $>, $) ) = ( $<, $( );
+        open STDERR, ">&STDOUT" if $include_stderr;
+        exec( @$cmd ) || die "Unable to exec program @$cmd: $!\n";
+    }
+
+    local $/;
+    my $output = <$fp>;
+    close( $fp );
+
+    return $output;
 }
 
 ##

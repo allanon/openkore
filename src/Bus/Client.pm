@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7874 $
+#  $Id: Client.pm 7874 2011-11-21 14:31:56Z fr3dbr $
 #
 #########################################################################
 ##

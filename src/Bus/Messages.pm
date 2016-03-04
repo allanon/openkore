@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 5284 $
+#  $Id: Messages.pm 5284 2007-01-01 17:26:40Z vcl_kore $
 #
 #########################################################################
 ##

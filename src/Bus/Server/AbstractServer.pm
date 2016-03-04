@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8847 $
+#  $Id: AbstractServer.pm 8847 2014-03-04 17:47:16Z marcelofoxes $
 #
 #########################################################################
 ##

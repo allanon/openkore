@@ -15,10 +15,7 @@
 
 package ChatQueue;
 
-#TODO: Review and test the whole document before adding them back
-#use strict; 
-#use warnings;
-
+use strict;
 use Time::HiRes qw(time);
 
 use AI;
@@ -81,15 +78,14 @@ sub clear {
 sub processFirst {
 	return unless @queue;
 	my $cmd = shift @queue;
-	my $user = $cmd->{user} || '';
-	return if ($user eq $char->{name});
+	return if ($cmd->{user} eq $char->{name});
 
 	my $type = $cmd->{type};
+	my $user = $cmd->{user};
 	my $msg = $cmd->{msg};
-	my $userID = $cmd->{userID};
 
 	return if ( $user ne ""
-		&& (avoidGM_talk($user, $msg) || avoidList_talk($user, $msg, unpack("V1", $userID))) );
+		&& (avoidGM_talk($user, $msg) || avoidList_talk($user, $msg, unpack("V1", $cmd->{userID}))) );
 
 
 	# If the user is not authorized to use chat commands,
@@ -105,11 +101,10 @@ sub processFirst {
 
 	# If the user is authorized to use chat commands,
 	# check whether his message is a chat command, and execute it.
-	my $callSign = '';
-	$callSign = quotemeta $config{"callSign"} if ($config{"callSign"});
-	if ($overallAuth{$user} && ( $type eq "pm" || $msg =~ /^\b$callSign\b/i )) {
+	my $callSign = quotemeta $config{callSign};
+	if ($overallAuth{$user} && ( $type eq "pm" || $msg =~ /^\b*$callSign\b*/i )) {
 		my $msg2 = $msg;
-		$msg2 =~ s/^\b$callSign\b *//i;
+		$msg2 =~ s/^\b*$callSign\b* *//i;
 		$msg2 =~ s/ *$//;
 		return if processChatCommand($type, $user, $msg2);
 	}
@@ -269,6 +264,12 @@ sub processChatCommand {
 		} else {
 	 		# map x y
 	 		($map, $x, $y) = @args;
+		}
+
+		if ($map eq "") {
+	 		$x eq "" || $y eq ""
+		} else {
+	 		$x ne "" && $y ne ""
 		}
 
 		if ($map ne "" || ($x ne "" && $y ne "")) {

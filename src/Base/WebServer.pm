@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8265 $
+#  $Id: WebServer.pm 8265 2012-10-30 12:42:26Z farrainbow $
 #
 #########################################################################
 ##

@@ -22,6 +22,7 @@ sub version { 29 }
 sub new {
 	my ($class) = @_;
 	my $self = $class->SUPER::new(@_);
+	$self->{char_create_version} = 1;
 
 	my %packets = (
 		'0067' => undef,

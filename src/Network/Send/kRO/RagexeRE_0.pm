@@ -22,9 +22,11 @@
 package Network::Send::kRO::RagexeRE_0;
 
 use strict;
-use base qw(Network::Send::kRO::RagexeRE_2014_03_05b);
+use base qw(Network::Send::kRO::RagexeRE_2012_06_18a);
 
-use Globals qw($incomingMessages $masterServer);
+use Log qw(message warning error debug);
+use Utils::Rijndael;
+use Globals qw($accountID $incomingMessages $masterServer);
 
 sub new {
 	my ($class) = @_;

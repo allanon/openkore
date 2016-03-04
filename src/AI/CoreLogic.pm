@@ -66,6 +66,7 @@ sub iterate {
 	Benchmark::begin("AI (part 1)") if DEBUG;
 	return if processClientSuspend();
 	Benchmark::begin("AI (part 1.1)") if DEBUG;
+	processFeed();
 	processLook();
 	$char->processTask('NPC');
 	processEquip();
@@ -81,6 +82,13 @@ sub iterate {
 	Benchmark::begin("AI (part 1.3)") if DEBUG;
 	processSkillUse();
 	processAutoCommandUse();
+
+# Identify whether there's a "clean" monster nearby without actually attacking it.
+my $can_route = 1;
+if ( $config{attackAuto} > 0 && AI::action eq 'route' && AI::args->{attackOnRoute} ) {
+    $can_route = !attackable_monster();
+}
+if ($can_route) {
 	$char->processTask("route", onError => sub {
 		my ($task, $error) = @_;
 		if (!($task->isa('Task::MapRoute') && $error->{code} == Task::MapRoute::TOO_MUCH_TIME())
@@ -88,6 +96,7 @@ sub iterate {
 			error("$error->{message}\n");
 		}
 	});
+}
 	processTake();
 	$char->processTask('move');
 	Benchmark::end("AI (part 1.3)") if DEBUG;
@@ -151,6 +160,7 @@ sub iterate {
 	#processAutoSkillsRaise(); moved to a task
 	#processTask("skill_raise");
 	processRandomWalk();
+if (!$field || !$field->baseName) { our $fieldTO ||= { time => 0, timeout => 1 }; if (timeout($fieldTO)) { $fieldTO->{time} = time; Log::message("FIELD IS EMPTY!!\n"); } }
 	processFollow();
 	Benchmark::end("AI (part 3.2)") if DEBUG;
 
@@ -168,7 +178,7 @@ sub iterate {
 
 	Misc::checkValidity("AI part 3");
 	processAutoEquip();
-	processAutoAttack();
+	processAutoAttack() if $config{attackAuto} > -1;
 	processItemsTake();
 	processItemsAutoGather();
 	processItemsGather();
@@ -179,7 +189,6 @@ sub iterate {
 	processSendEmotion();
 	processAutoShopOpen();
 	processRepairAuto();
-	processFeed();
 	Benchmark::end("AI (part 4)") if DEBUG;
 
 
@@ -523,14 +532,6 @@ sub processPortalRecording {
 		updatePortalLUT(Settings::getTableFilename("portals.txt"),
 				$destMap, $destPos{x}, $destPos{y},
 				$sourceMap, $sourcePos{x}, $sourcePos{y});
-		Plugins::callHook('portal_exist2', {
-			srcMap => $destMap,
-			srcx => $destPos{x},
-			srcy => $destPos{y},
-			dstMap => $sourceMap,
-			dstx => $sourcePos{x},
-			dsty => $sourcePos{y}
-		});
 	}
 
 	# Record information about the source portal
@@ -548,14 +549,6 @@ sub processPortalRecording {
 		updatePortalLUT(Settings::getTableFilename("portals.txt"),
 				$sourceMap, $sourcePos{x}, $sourcePos{y},
 				$destMap, $char->{pos}{x}, $char->{pos}{y});
-		Plugins::callHook('portal_exist2', {
-			srcMap => $sourceMap,
-			srcx => $sourcePos{x},
-			srcy => $sourcePos{y},
-			dstMap => $destMap,
-			dstx => $char->{pos}{x},
-			dsty => $char->{pos}{y}
-		});
 	}
 }
 
@@ -648,9 +641,9 @@ sub processSkillUse {
 		delete AI::args->{suspended};
 	}
 
+	my $args = AI::args;
 	SKILL_USE: {
 		last SKILL_USE if (AI::action ne "skill_use");
-		my $args = AI::args;
 
 		if ($args->{monsterID} && $skillsArea{$args->{skillHandle}} == 2) {
 			delete $args->{monsterID};
@@ -659,14 +652,37 @@ sub processSkillUse {
 		if (exists $args->{ai_equipAuto_skilluse_giveup} && binFind(\@skillsID, $args->{skillHandle}) eq "" && timeOut($args->{ai_equipAuto_skilluse_giveup})) {
 			warning T("Timeout equiping for skill\n");
 			AI::dequeue;
+			$args->{cast_complete} = 1;
+message "dequeue ".__LINE__."!\n";
 			${$args->{ret}} = 'equip timeout' if ($args->{ret});
-		} elsif (Actor::Item::scanConfigAndCheck("$args->{prefix}_equip")) {
-			#check if item needs to be equipped
-			Actor::Item::scanConfigAndEquip("$args->{prefix}_equip");
-		} elsif (timeOut($args->{waitBeforeUse})) {
+			last SKILL_USE;
+		}
+
+		if (defined $args->{monsterID} && !defined $monsters{$args->{monsterID}}) {
+			# This skill is supposed to be used for attacking a monster, but that monster has died
+			AI::dequeue;
+			$args->{cast_complete} = 1;
+message "dequeue ".__LINE__."!\n";
+			${$args->{ret}} = 'target gone' if ($args->{ret});
+			last SKILL_USE;
+		}
+
+		#check if item needs to be equipped
+		if (!$args->{equipped} && Actor::Item::scanConfigAndCheck("$args->{prefix}_equip")) {
+			$args->{equipped} = Actor::Item::scanConfigAndEquip("$args->{prefix}_equip", 1);
+use JSON;
+message "Equipping! ($args->{skill_used})\n";
+message encode_json($args->{equipped})."\n";
+		}
+        if ( $args->{equipped} ) {
+            last SKILL_USE if Actor::Item::scanConfigAndCheck( "$args->{prefix}_equip", 1 );
+        }
+		if (timeOut($args->{waitBeforeUse})) {
 			if (defined $args->{monsterID} && !defined $monsters{$args->{monsterID}}) {
 				# This skill is supposed to be used for attacking a monster, but that monster has died
 				AI::dequeue;
+				$args->{cast_complete} = 1;
+message "dequeue ".__LINE__."!\n";
 				${$args->{ret}} = 'target gone' if ($args->{ret});
 
 			} elsif ($char->{sitting} && !$char->{statuses}->{EFST_TENSIONRELAX}) {
@@ -685,20 +701,26 @@ sub processSkillUse {
 				if ($handle eq 'AL_TELEPORT') {
 					${$args->{ret}} = 'ok' if ($args->{ret});
 					AI::dequeue;
+					$args->{cast_complete} = 1;
+message "dequeue ".__LINE__."!\n";
 					useTeleport($args->{lv});
 					last SKILL_USE;
 				}
 
 				$args->{skill_used} = 1;
 				$args->{giveup}{time} = time;
+				$args->{minCastTime}{time} = time;
 
 				# Stop attacking, otherwise skill use might fail
 				my $attackIndex = AI::findAction("attack");
-				if (defined($attackIndex) && AI::args($attackIndex)->{attackMethod}{type} eq "weapon") {
+				if (defined($attackIndex) && AI::args($attackIndex)->{lastAttackMethod}{type} eq 'weapon' && AI::args($attackIndex)->{thisAttackMethod}{type} eq 'skill' && !timeOut($timeout{ai_attack})) {
 					# 2005-01-24 pmak: Commenting this out since it may
 					# be causing bot to attack slowly when a buff runs
 					# out.
-					#$char->stopAttack();
+                    message "Canceling auto-attack before skill use.\n";
+					$messageSender->sendAction(AI::args($attackIndex)->{ID}, 0);
+					$char->sendAttackStop;
+					sleep 0.1;
 				}
 
 				# Give an error if we don't actually possess this skill
@@ -710,10 +732,24 @@ sub processSkillUse {
 				$args->{maxCastTime}{time} = time;
 				if ($skillsArea{$handle} == 2) {
 					$messageSender->sendSkillUse($skillID, $args->{lv}, $accountID);
+message "Sending skill use [$skillID $args->{lv}] account [$accountID]\n";
 				} elsif ($args->{x} ne "") {
 					$messageSender->sendSkillUseLoc($skillID, $args->{lv}, $args->{x}, $args->{y});
+message "Sending skill use [$skillID $args->{lv}] location [$args->{x} $args->{y}]\n";
 				} else {
 					$messageSender->sendSkillUse($skillID, $args->{lv}, $args->{target});
+					if (defined($attackIndex) && AI::args($attackIndex)->{lastAttackMethod}{type} eq 'weapon' && AI::args($attackIndex)->{thisAttackMethod}{type} eq 'skill' && !timeOut($timeout{ai_attack})) {
+#					    $messageSender->sendSkillUse($skillID, $args->{lv}, $args->{target});
+#					    $messageSender->sendSkillUse($skillID, $args->{lv}, $args->{target});
+#					    $messageSender->sendSkillUse($skillID, $args->{lv}, $args->{target});
+					}
+
+my $str = '';
+if ( $args->{monsterID} ) {
+    my $dist = Utils::distance( Utils::calcPosition( $monsters{ $args->{monsterID} } ), Utils::calcPosition( $char ) );
+    $str .= sprintf ' (Dist: %.1f)', $dist;
+}
+message "Sending skill use [$skillID $args->{lv}] mob$str\n";
 				}
 				undef $char->{permitSkill};
 				$args->{skill_use_last} = $char->{skills}{$handle}{time_used};
@@ -723,10 +759,14 @@ sub processSkillUse {
 			} elsif (timeOut($args->{minCastTime})) {
 				if ($args->{skill_use_last} != $char->{skills}{$args->{skillHandle}}{time_used}) {
 					AI::dequeue;
+message "dequeue [".__LINE__."] [ok]!\n";
+					$args->{cast_complete} = 1;
 					${$args->{ret}} = 'ok' if ($args->{ret});
 
 				} elsif ($char->{cast_cancelled} > $char->{time_cast}) {
 					AI::dequeue;
+message "dequeue [".__LINE__."] [cancelled]!\n";
+					$args->{cast_complete} = 1;
 					${$args->{ret}} = 'cancelled' if ($args->{ret});
 
 				} elsif (timeOut($char->{time_cast}, $char->{time_cast_wait} + 0.5)
@@ -734,10 +774,21 @@ sub processSkillUse {
 				      || ( $args->{maxCastTime}{timeout} && timeOut($args->{maxCastTime})) )
 				) {
 					AI::dequeue;
+					$args->{cast_complete} = 1;
+message "dequeue [".__LINE__."] [timeout]!\n";
 					${$args->{ret}} = 'timeout' if ($args->{ret});
+
+					# There is a high chance that this means we're not 
+					# actually where we think we are, or that we're currently 
+					# attacking. Send a "move to current location" packet.
+					$char->sendAttackStop if !$config{"$args->{prefix}_isSlaveSkill"};
 				}
 			}
 		}
+	}
+	if ($args->{equipped} && $args->{skill_used} && $args->{cast_complete}) {
+		Actor::Item::bulkEquip($args->{equipped});
+message "Re-equipping!\n";
 	}
 }
 
@@ -755,6 +806,19 @@ sub processTake {
 	} elsif (AI::action eq "take" && timeOut(AI::args->{ai_take_giveup})) {
 		message TF("Failed to take %s (%s) from (%s, %s) to (%s, %s)\n", $item->{name}, $item->{binID}, $char->{pos}{x}, $char->{pos}{y}, $item->{pos}{x}, $item->{pos}{y});
 		$item->{take_failed}++;
+        Plugins::callHook( 'take_failed', { item => $item } );
+		# Might be position-bugged. Move 3-5 tiles away and re-try.
+        if ( 0 && $item->{take_failed} == 1 ) {
+            my @stand = calcRectArea2( $item->{pos}->{x}, $item->{pos}->{y}, 5, 3 );
+            foreach ( @stand ) {
+                next if !$field->isWalkable( $_->{x}, $_->{y} );
+                next if !checkLineWalkable( $char->{pos}, $_ );
+                $char->move( @_{qw(x y)} );
+                AI::args->{ai_take_giveup}->{time} = time;
+                Log::message("Position-bugged? Moving to ($_->{x},$_->{y}).\n");
+                return;
+            }
+        }
 		AI::dequeue;
 
 	} elsif (AI::action eq "take") {
@@ -1168,7 +1232,7 @@ sub processAutoStorage {
 
 		my $do_route;
 
-		if (!$config{storageAuto_useChatCommand}) {
+		if (!$config{storageAuto_useChatCommand} && !$storage{opened}) {
 			# Stop if the specified NPC is invalid
 			$args->{npc} = {};
 			getNPCInfo($config{'storageAuto_npc'}, $args->{npc});
@@ -1220,7 +1284,7 @@ sub processAutoStorage {
 		}
 		if (!$do_route) {
 			# Talk to NPC if we haven't done so
-			if (!defined($args->{sentStore})) {
+			if (!defined($args->{sentStore}) && !$storage{opened}) {
 				if ($config{storageAuto_useChatCommand}) {
 					$messageSender->sendChat($config{storageAuto_useChatCommand});
 				} else {
@@ -1249,7 +1313,7 @@ sub processAutoStorage {
 				return;
 			}
 
-			if (!defined $ai_v{temp}{storage_opened}) {
+			if (!defined $ai_v{temp}{storage_opened} && !$storage{opened}) {
 				# NPC talk retry
 				if (timeOut($AI::Timeouts::storageOpening, 40)) {
 					undef $args->{sentStore};
@@ -1578,10 +1642,9 @@ sub processAutoBuy {
 		my $needitem;
 	if ((AI::action eq "" || AI::action eq "route" || AI::action eq "follow") && timeOut($timeout{'ai_buyAuto'}) && time > $ai_v{'inventory_time'}) {
 		undef $ai_v{'temp'}{'found'};
-		
-		for(my $i = 0; exists $config{"buyAuto_$i"}; $i++) {
-			next if (!$config{"buyAuto_$i"} || !$config{"buyAuto_$i"."_npc"} || $config{"buyAuto_${i}_disabled"});
-			
+		my $i = 0;
+		while (1) {
+			last if (!$config{"buyAuto_$i"} || !$config{"buyAuto_$i"."_npc"});
 			my $item = $char->inventory->getByName($config{"buyAuto_$i"});
 			if ($config{"buyAuto_$i"."_minAmount"} ne "" && $config{"buyAuto_$i"."_maxAmount"} ne ""
 				&& (checkSelfCondition("buyAuto_$i"))
@@ -1597,6 +1660,7 @@ sub processAutoBuy {
 					$needitem = "$bai";
 				} else {$needitem = "$needitem, $bai";}
 			}
+			$i++;
 		}
 		$ai_v{'temp'}{'ai_route_index'} = AI::findAction("route");
 		if ($ai_v{'temp'}{'ai_route_index'} ne "") {
@@ -1750,6 +1814,18 @@ sub processAutoBuy {
 				return;
 			}
 
+            # We can send a buy request for an item which doesn't even exist. Let's avoid that.
+            my $found;
+            for ( my $i = 0 ; $i < @storeList ; $i++ ) {
+                $found = $i if $storeList[$i]{nameID} eq $args->{itemID};
+            }
+            if ( !defined $found ) {
+                warning TF( "NPC does not sell item [%s].\n", $config{"buyAuto_$args->{index}"} ), 'npc';
+                $args->{done} = 1;
+                $config{"buyAuto_$args->{index}_disabled"} = 1;
+                return;
+            }
+
 			my $maxbuy = ($config{"buyAuto_$args->{index}"."_price"}) ? int($char->{zeny}/$config{"buyAuto_$args->{index}"."_price"}) : 30000; # we assume we can buy 30000, when price of the item is set to 0 or undef
 			my $needbuy = $config{"buyAuto_$args->{index}"."_maxAmount"};
 			$needbuy -= $char->inventory->get($args->{invIndex})->{amount} if ($args->{invIndex} ne ""); # we don't need maxAmount if we already have a certain amount of the item in our inventory
@@ -1839,13 +1915,13 @@ sub processLockMap {
 					$i = 500;
 					if ($config{'lockMap_x'} || $config{'lockMap_y'}) {
 						do {
-							$lockX = int(rand($field->width + 1)) if (!$config{'lockMap_x'} && $config{'lockMap_y'});
-							$lockX = int($config{'lockMap_x'}) if ($config{'lockMap_x'});
-							$lockX += (int(rand(2*$config{'lockMap_randX'} + 1) - $config{'lockMap_randX'})) if ($config{'lockMap_x'} && $config{'lockMap_randX'});
+                			$lockX = 1 + int rand $field->width;
+                			$lockX = int $config{'lockMap_x'} if $config{'lockMap_x'};
+                            $lockX += int( rand 2 * $config{'lockMap_randX'} + 1 ) - $config{'lockMap_randX'} if $config{'lockMap_x'} && $config{'lockMap_randX'};
 
-							$lockY = int(rand($field->width + 1)) if (!$config{'lockMap_y'} && $config{'lockMap_x'});
-							$lockY = int($config{'lockMap_y'}) if ($config{'lockMap_y'});
-							$lockY += (int(rand(2*$config{'lockMap_randY'} + 1) - $config{'lockMap_randY'})) if ($config{'lockMap_y'} && $config{'lockMap_randY'});
+                			$lockY = 1 + int rand $field->height;
+                			$lockY = int $config{'lockMap_y'} if $config{'lockMap_y'};
+                            $lockY += int( rand 2 * $config{'lockMap_randY'} + 1 ) - $config{'lockMap_randY'} if $config{'lockMap_y'} && $config{'lockMap_randY'};
 						} while (--$i && !$lockField->isWalkable($lockX, $lockY));
 					}
 				};
@@ -1972,7 +2048,14 @@ sub processAutoSkillsRaise {
 
 ##### RANDOM WALK #####
 sub processRandomWalk {
-	if (AI::isIdle && (AI::SlaveManager::isIdle()) && $config{route_randomWalk} && !$ai_v{sitAuto_forcedBySitCommand}
+	Plugins::callHook('AI_pre/randomWalk');
+	my $idle = AI::isIdle;
+    if ( !$idle && AI::action eq 'follow' ) {
+        my $leader = $players{ AI::args->{ID} };
+        my $lock_dist = $leader && $config{lockMap_x} && $config{lockMap_y} ? distance( $leader->{pos_to}, { x => $config{lockMap_x}, y => $config{lockMap_y} } ) : 1000;
+        $idle = 1 if $lock_dist < $config{followDistanceMax};
+    }
+	if ($idle && (AI::SlaveManager::isIdle()) && $config{route_randomWalk} && !$ai_v{sitAuto_forcedBySitCommand}
 		&& (!$field->isCity || $config{route_randomWalk_inTown})
 		&& length($field->{rawMap}) 
 		){
@@ -1991,6 +2074,7 @@ sub processRandomWalk {
 			$randY = $config{'lockMap_y'} if ($char->{pos}{y} == $config{'lockMap_y'} && !($config{'lockMap_randY'} > 0));
 			$randY = $config{'lockMap_y'} - $config{'lockMap_randY'} + int(rand(2*$config{'lockMap_randY'}+1)) if ($config{'lockMap_y'} ne '' && $config{'lockMap_randY'} >= 0);
 		} while (--$i && (!$field->isWalkable($randX, $randY) || $randX == 0 || $randY == 0));
+		return if $randX == $char->{pos_to}->{x} && $randY == $char->{pos_to}->{y};
 		if (!$i) {
 			error T("Invalid coordinates specified for randomWalk (coordinates are unwalkable); randomWalk disabled\n");
 			$config{'route_randomWalk'} = 0;
@@ -2052,7 +2136,9 @@ sub processFollow {
  		message TF("Found my master!\n"), "follow"
 	}
 
-	# if we are not doing anything else now...
+    my ( $master ) = grep { $_ && %$_ && ( !$_->{map} || $_->{map} eq $field->baseName . '.gat' ) } $players{ $args->{ID} }, $char->{party} && $char->{party}{users}{ $args->{ID} };
+    $master ||= {};
+    my ( $master_pos ) = grep { $_ && $_->{x} && $_->{y} } scalar $master->{pos_to}, scalar $master->{pos};
 	if (AI::action eq "follow") {
 		if (AI::args->{'suspended'}) {
 			if (AI::args->{'ai_follow_lost'}) {
@@ -2063,22 +2149,20 @@ sub processFollow {
 
 		# if we are not doing anything else now...
 		if (!$args->{ai_follow_lost}) {
-			my $ID = $args->{ID};
-			my $player = $players{$ID};
-
-			if ($args->{following} && $player->{pos_to}) {
-				my $dist = distance($char->{pos_to}, $player->{pos_to});
-				if ($dist > $config{followDistanceMax} && timeOut($args->{move_timeout}, 0.25)) {
+			if ($args->{following} && $master_pos) {
+				my $dist = distance($char->{pos_to}, $master_pos);
+				if (($dist > $config{followDistanceMax} || $dist < $config{followDistanceMin}) && timeOut($args->{move_timeout}, 0.25)) {
 					$args->{move_timeout} = time;
-					if ( $dist > 15 || ($config{followCheckLOS} && !checkLineWalkable($char->{pos_to}, $player->{pos_to})) ) {
-						ai_route($field->baseName, $player->{pos_to}{x}, $player->{pos_to}{y},
+					if ( $dist > 15 || ($config{followCheckLOS} && !checkLineWalkable($char->{pos_to}, $master_pos)) ) {
+#Log::message(sprintf "follow dist %3d: (1) route to %3d,%3d\n", $dist, $master_pos->{x}, $master_pos->{y});
+						ai_route($field->baseName, $master_pos->{x}, $master_pos->{y},
 							attackOnRoute => 1,
 							distFromGoal => $config{followDistanceMin});
 					} else {
 						my (%vec, %pos);
 
 						stand() if ($char->{sitting});
-						getVector(\%vec, $player->{pos_to}, $char->{pos_to});
+						getVector(\%vec, $master_pos, $char->{pos_to});
 						moveAlongVector(\%pos, $char->{pos_to}, \%vec, $dist - $config{followDistanceMin});
 						$timeout{ai_sit_idle}{time} = time;
 						
@@ -2094,36 +2178,35 @@ sub processFollow {
 								$pos{y} -= int(rand($config{followRandomDistance})); }
 						}
 						
+#Log::message(sprintf "follow dist %d: (1) move to %d,%d\n", $dist, $pos{x}, $pos{y});
 						$char->sendMove(@pos{qw(x y)});
 					}
 				}
 			}
 
-			if ($args->{following} && $player && %{$player}) {
-				if ($config{'followSitAuto'} && $players{$args->{'ID'}}{'sitting'} == 1 && $chars[$config{'char'}]{'sitting'} == 0) {
+			if ($args->{following} && %$master) {
+				if ($config{'followSitAuto'} && $master->{'sitting'} == 1 && $chars[$config{'char'}]{'sitting'} == 0) {
 					sit();
 				}
 
-				my $dx = $args->{'last_pos_to'}{'x'} - $players{$args->{'ID'}}{'pos_to'}{'x'};
-				my $dy = $args->{'last_pos_to'}{'y'} - $players{$args->{'ID'}}{'pos_to'}{'y'};
-				$args->{'last_pos_to'}{'x'} = $players{$args->{'ID'}}{'pos_to'}{'x'};
-				$args->{'last_pos_to'}{'y'} = $players{$args->{'ID'}}{'pos_to'}{'y'};
+				my $dx = $args->{'last_pos_to'}{'x'} - $master_pos->{'x'};
+				my $dy = $args->{'last_pos_to'}{'y'} - $master_pos->{'y'};
+				$args->{'last_pos_to'}{'x'} = $master_pos->{'x'};
+				$args->{'last_pos_to'}{'y'} = $master_pos->{'y'};
 				if ($dx != 0 || $dy != 0) {
-					lookAtPosition($players{$args->{'ID'}}{'pos_to'}) if ($config{'followFaceDirection'});
+					lookAtPosition($master_pos) if ($config{'followFaceDirection'});
 				}
 			}
 		}
 	}
 
 	if (AI::action eq "follow" && $args->{'following'} && (
-		( $players{$args->{'ID'}} && $players{$args->{'ID'}}{'dead'} ) || (
-			( !$players{$args->{'ID'}} || !%{$players{$args->{'ID'}}} )
-			&& $players_old{$args->{'ID'}} && $players_old{$args->{'ID'}}{'dead'}
-		)
+		$master->{'dead'} || 
+		(!%$master && $players_old{$args->{'ID'}} && $players_old{$args->{'ID'}}{'dead'})
 	)) {
  		message T("Master died. I'll wait here.\n"), "party";
 		delete $args->{'following'};
-	} elsif ($args->{'following'} && ( !$players{$args->{'ID'}} || !%{$players{$args->{'ID'}}} )) {
+	} elsif ($args->{'following'} && !%$master) {
  		message T("I lost my master\n"), "follow";
 		if ($config{'followBot'}) {
  			message T("Trying to get him back\n"), "follow";
@@ -2224,6 +2307,7 @@ sub processFollow {
 			my $pos = $ai_v{'temp'}{'warp_pos'};
 
 			if ($config{followCheckLOS} && !checkLineWalkable($char->{pos_to}, $pos)) {
+#Log::message(sprintf "follow dist %3d: (2) route to %3d,%3d\n", -1, $pos->{x}, $pos->{y});
 				ai_route($field->baseName, $pos->{x}, $pos->{y},
 					attackOnRoute => 0); #distFromGoal => 0);
 			} else {
@@ -2234,6 +2318,7 @@ sub processFollow {
 				getVector(\%vec, $pos, $char->{pos_to});
 				moveAlongVector(\%pos_to, $char->{pos_to}, \%vec, $dist);
 				$timeout{ai_sit_idle}{time} = time;
+#Log::message(sprintf "follow dist %d: (2) move to %d,%d\n", $dist, $pos_to{x}, $pos_to{y});
 				$char->move(@pos_to{qw(x y)});
 				$pos->{x} = int $pos_to{x};
 				$pos->{y} = int $pos_to{y};
@@ -2251,6 +2336,7 @@ sub processFollow {
 		} elsif ($args->{'lost_stuck'}) {
 			if ($args->{'follow_lost_portalID'} eq "") {
 				moveAlongVector($ai_v{'temp'}{'pos'}, $chars[$config{'char'}]{'pos_to'}, $args->{'ai_follow_lost_vec'}, $config{'followLostStep'} / ($args->{'lost_stuck'} + 1));
+#Log::message(sprintf "follow dist %d: (3) move to %d,%d\n", -1, $ai_v{temp}{pos}{x}, $ai_v{temp}{pos}{y});
 				$char->move(@{$ai_v{temp}{pos}}{qw(x y)});
 			}
 		} else {
@@ -2264,6 +2350,7 @@ sub processFollow {
 				}
 			} else {
 				moveAlongVector($ai_v{'temp'}{'pos'}, $chars[$config{'char'}]{'pos_to'}, $args->{'ai_follow_lost_vec'}, $config{'followLostStep'});
+#Log::message(sprintf "follow dist %d: (4) move to %d,%d\n", -1, $ai_v{temp}{pos}{x}, $ai_v{temp}{pos}{y});
 				$char->move(@{$ai_v{temp}{pos}}{qw(x y)});
 			}
 		}
@@ -2455,6 +2542,7 @@ sub processAutoSkillUse {
 
 ##### PARTY-SKILL USE #####
 sub processPartySkillUse {
+    return if $char->{statuses}->{EFST_POSTDELAY};
 	if (AI::isIdle || AI::is(qw(route mapRoute follow sitAuto take items_gather items_take attack move))){
 		my %party_skill;
 		PARTYSKILL:
@@ -2474,7 +2562,8 @@ sub processPartySkillUse {
 					next if (($char->{slaves}{$ID} ne $slavesList->getByID($ID)) && !$config{"partySkill_$i"."_notPartyOnly"});
 				} elsif ($playersList->getByID($ID)) {
 					unless ($config{"partySkill_$i"."_notPartyOnly"}) {
-						next unless $char->{party} && $char->{party}{users}{$ID};
+						next if !$char->{party};
+						next if !$char->{party}{users}{$ID};
 						
 						# party member should be online, otherwise it's another character on the same account (not in party)
 						next unless $char->{party}{users}{$ID}{online};
@@ -2520,6 +2609,7 @@ sub processPartySkillUse {
 					# This is used by setSkillUseTimer() to set
 					# $ai_v{"partySkill_${i}_target_time"}{$targetID}
 					# when the skill is actually cast
+					$ai_v{"partySkill_${i}_time"} = time;
 					$targetTimeout{$ID}{$party_skill{ID}} = $i;
 					last PARTYSKILL;
 				}
@@ -2635,23 +2725,163 @@ sub processAutoEquip {
 			 && checkSelfCondition("equipAuto_$i")
 			 && Actor::Item::scanConfigAndCheck("equipAuto_$i")
 			) {
-				foreach my $slot (values %equipSlot_lut) {
-					if (exists $config{"equipAuto_$i"."_$slot"}) {
-						debug "Equip $slot with ".$config{"equipAuto_$i"."_$slot"}."\n";
-						$eq_list{$slot} = $config{"equipAuto_$i"."_$slot"} if (!$eq_list{$slot});
-					}
-				}
+				debug "Auto-equipping items\n", "equipAuto";
+				Actor::Item::scanConfigAndEquip("equipAuto_$i");
 			}
 		}
 
-		if (%eq_list) {
-			debug "Auto-equipping items\n", "equipAuto";
-			Actor::Item::bulkEquip(\%eq_list);
-		}
 		$timeout{ai_item_equip_auto}{time} = time;
 
 	}
 	Benchmark::end("ai_autoEquip") if DEBUG;
+}
+
+# All of the logic of processAutoAttack without the actual attack action.
+sub attackable_monster {
+	return if (!$field);
+	if ((AI::isIdle || AI::is(qw/route follow sitAuto take items_gather items_take/) || (AI::action eq "mapRoute" && AI::args->{stage} eq 'Getting Map Solution'))
+	     # Don't auto-attack monsters while taking loot, and itemsTake/GatherAuto >= 2
+	  && !($config{'itemsTakeAuto'} >= 2 && AI::is("take", "items_take"))
+	  && !($config{'itemsGatherAuto'} >= 2 && AI::is("take", "items_gather"))
+	  && timeOut($timeout{ai_attack_auto})
+	  # If !teleportAuto_search, then searchMonsters >= teleportAuto_search will be true - no need for first condition?
+	  && (!$config{teleportAuto_search} || $ai_v{temp}{searchMonsters} >= $config{teleportAuto_search})
+	  && (!$config{attackAuto_notInTown} || !$field->isCity)) {
+
+		# If we're in tanking mode, only attack something if the person we're tanking for is on screen.
+		my $foundTankee;
+		if ($config{'tankMode'}) {
+			$foundTankee = 1 if $config{tankModeTarget} eq $char->{name};
+			for (@{$playersList->getItems}, @{$slavesList->getItems}) {
+				if (
+					$config{tankModeTarget} eq $_->{name}
+					or $char->{homunculus} && $config{tankModeTarget} eq '@homunculus' && $_->{ID} eq $char->{homunculus}{ID}
+					or $char->{mercenary} && $config{tankModeTarget} eq '@mercenary' && $_->{ID} eq $char->{mercenary}{ID}
+				) {
+					$foundTankee = 1;
+					last;
+				}
+			}
+		}
+
+		my $attackTarget;
+
+		if (!$config{'tankMode'} || $foundTankee) {
+			# Detect whether we are currently in follow mode
+			my $following;
+			my $followID;
+			if (defined(my $followIndex = AI::findAction("follow"))) {
+				$following = AI::args($followIndex)->{following};
+				$followID = AI::args($followIndex)->{ID};
+			}
+
+			my $routeIndex = AI::findAction("route");
+			$routeIndex = AI::findAction("mapRoute") if (!defined $routeIndex);
+			my $attackOnRoute;
+			if (defined $routeIndex) {
+				$attackOnRoute = AI::args($routeIndex)->{attackOnRoute};
+			} else {
+				$attackOnRoute = 2;
+			}
+
+			my $LOSSubRoute = 0;
+			if ($config{attackCheckLOS}
+			 && AI::args(0)->{LOSSubRoute}
+			) {
+				$LOSSubRoute = 1;
+			}
+
+			### Step 1: Generate a list of all monsters that we are allowed to attack. ###
+
+			my @aggressives;
+			my @partyMonsters;
+			my @cleanMonsters;
+
+			# List aggressive monsters
+			@aggressives = ai_getAggressives(1) if ($config{'attackAuto'} && ($attackOnRoute || $LOSSubRoute));
+
+			# List party monsters
+			foreach (@monstersID) {
+				next if (!$_ || !checkMonsterCleanness($_));
+				my $monster = $monsters{$_};
+
+				OpenKoreMod::autoAttack($monster) if (defined &OpenKoreMod::autoAttack);
+
+				# List monsters that party members are attacking
+				if ($config{attackAuto_party} && $attackOnRoute && !AI::is("take", "items_take")
+				 && !$ai_v{sitAuto_forcedBySitCommand}
+				 && (($monster->{dmgFromParty} && $config{attackAuto_party} != 2) ||
+				     $monster->{dmgToParty} || $monster->{missedToParty})
+				 && timeOut($monster->{attack_failed}, $timeout{ai_attack_unfail}{timeout})) {
+					push @partyMonsters, $_;
+					next;
+				}
+
+				# List monsters that the master is attacking
+				if ($following && $config{'attackAuto_followTarget'} && $attackOnRoute && !AI::is("take", "items_take")
+				 && ($monster->{dmgToPlayer}{$followID} || $monster->{dmgFromPlayer}{$followID} || $monster->{missedToPlayer}{$followID})
+				 && timeOut($monster->{attack_failed}, $timeout{ai_attack_unfail}{timeout})) {
+					push @partyMonsters, $_;
+					next;
+				}
+
+				my $control = mon_control($monster->{name});
+				if (!AI::is(qw/sitAuto take items_gather items_take/)
+				 && $config{'attackAuto'} >= 2
+				 && ($control->{attack_auto} == 1 || $control->{attack_auto} == 3)
+				 && (!$config{'attackAuto_onlyWhenSafe'} || isSafe())
+				 && !$ai_v{sitAuto_forcedBySitCommand}
+				 && ($attackOnRoute >= 2 || $LOSSubRoute)
+				 && !$monster->{dmgFromYou}
+				 && (!$monster->{statuses}->{EFFECTSTATE_BURROW} || $config{attackAuto_hidden})
+				 && timeOut($monster->{attack_failed}, $timeout{ai_attack_unfail}{timeout})) {
+					push @cleanMonsters, $_;
+				}
+			}
+
+			# Filter out monsters we'd have to move to attack when in turret mode.
+			if ( $config{attackTurretMode} ) {
+				my $pos = calcPosition( $char );
+				my $max = $config{attackDistance};
+				foreach ( \@aggressives, \@partyMonsters, \@cleanMonsters ) {
+					@$_ = grep { distance( $pos, calcPosition( Actor::get( $_ ) ) ) <= $max } @$_;
+				}
+			}
+
+			### Step 2: Pick out the "best" monster ###
+
+			# We define whether we should attack only monsters in LOS or not
+			my $nonLOSNotAllowed = !$config{attackCheckLOS} || $LOSSubRoute;
+			$attackTarget = getBestTarget(\@aggressives, $nonLOSNotAllowed)
+							|| getBestTarget(\@partyMonsters, $nonLOSNotAllowed)
+							|| getBestTarget(\@cleanMonsters, $nonLOSNotAllowed);
+
+			if ($LOSSubRoute && $attackTarget) {
+				Log::message("New target was choosen\n");
+				# Remove all unnecessary actions (attacks and movements but the main route)
+				my $i = scalar(@ai_seq);
+				my (@ai_seq_temp, @ai_seq_args_temp);
+				for(my $c=0;$c<$i;$c++) {
+					if (($ai_seq[$c] ne "route")
+					  && ($ai_seq[$c] ne "move")
+					  && ($ai_seq[$c] ne "attack")) {
+						push(@ai_seq_temp, $ai_seq[$c]);
+						push(@ai_seq_args_temp, $ai_seq_args[$c]);
+					}
+				}
+				# Add the main route and rewrite the sequence
+				push(@ai_seq_temp, $ai_seq[$i-1]);
+				push(@ai_seq_args_temp, $ai_seq_args[$i-1]);
+				@ai_seq = @ai_seq_temp;
+				@ai_seq_args = @ai_seq_args_temp;
+				# We need this timeout not to have attack started many times
+				$timeout{'ai_attack_auto'}{'time'} = time;
+			}
+		}
+
+		return $attackTarget;
+	}
+	return;
 }
 
 ##### AUTO-ATTACK #####
@@ -2675,6 +2905,7 @@ sub processAutoAttack {
 		# If we're in tanking mode, only attack something if the person we're tanking for is on screen.
 		my $foundTankee;
 		if ($config{'tankMode'}) {
+			$foundTankee = 1 if $config{tankModeTarget} eq $char->{name};
 			for (@{$playersList->getItems}, @{$slavesList->getItems}) {
 				if (
 					$config{tankModeTarget} eq $_->{name}
@@ -2758,9 +2989,18 @@ sub processAutoAttack {
 				 && !$ai_v{sitAuto_forcedBySitCommand}
 				 && ($attackOnRoute >= 2 || $LOSSubRoute)
 				 && !$monster->{dmgFromYou}
-				 && ($control->{dist} eq '' || distance($monster->{pos}, calcPosition($char)) <= $control->{dist})
+				 && (!$monster->{statuses}->{EFFECTSTATE_BURROW} || $config{attackAuto_hidden})
 				 && timeOut($monster->{attack_failed}, $timeout{ai_attack_unfail}{timeout})) {
 					push @cleanMonsters, $_;
+				}
+			}
+
+			# Filter out monsters we'd have to move to attack when in turret mode.
+			if ( $config{attackTurretMode} ) {
+				my $pos = calcPosition( $char );
+				my $max = $config{attackDistance};
+				foreach ( \@aggressives, \@partyMonsters, \@cleanMonsters ) {
+					@$_ = grep { distance( $pos, calcPosition( Actor::get( $_ ) ) ) <= $max } @$_;
 				}
 			}
 
@@ -2829,7 +3069,7 @@ sub processItemsTake {
 			my $item = $items{$_};
 			next if (pickupitems($item->{name}) eq "0" || pickupitems($item->{name}) == -1);
 
-			$dist = distance($item->{pos}, AI::args->{pos});
+			$dist = distance($item->{pos}, AI::args->{pos});    
 			$dist_to = distance($item->{pos}, AI::args->{pos_to});
 			if (($dist <= 4 || $dist_to <= 4) && $item->{take_failed} == 0) {
 				$foundID = $_;
@@ -2850,29 +3090,33 @@ sub processItemsTake {
 
 ##### ITEMS AUTO-GATHER #####
 sub processItemsAutoGather {
-	if ( (AI::isIdle || AI::action eq "follow"
-		|| ( AI::is("route", "mapRoute") && (!AI::args->{ID} || $config{'itemsGatherAuto'} >= 2)  && !$config{itemsTakeAuto_new}))
-	  && $config{'itemsGatherAuto'}
-	  && !$ai_v{sitAuto_forcedBySitCommand}
-	  && ($config{'itemsGatherAuto'} >= 2 || !ai_getAggressives())
-	  && percent_weight($char) < $config{'itemsMaxWeight'}
-	  && timeOut($timeout{ai_items_gather_auto}) ) {
+    return if !$config{itemsGatherAuto};
+    my $is_routing = AI::is( qw( route mapRoute ) );
+    return if !AI::isIdle && !$is_routing && AI::action ne 'follow';
+    return if $is_routing && $config{itemsTakeAuto_new};
+    return if $is_routing && $config{itemsGatherAuto} < 2 && AI::args->{ID};
+    return if $config{itemsGatherAuto} < 2 && ai_getAggressives();
+    return if percent_weight( $char ) >= $config{itemsMaxWeight};
+    return if !timeOut( $timeout{ai_items_gather_auto} );
+    $timeout{ai_items_gather_auto}{time} = time;
 
-		foreach my $item (@itemsID) {
-			next if ($item eq ""
-				|| !timeOut($items{$item}{appear_time}, $timeout{ai_items_gather_start}{timeout})
-				|| $items{$item}{take_failed} >= 1
-				|| pickupitems(lc($items{$item}{name})) eq "0"
-				|| pickupitems(lc($items{$item}{name})) == -1 );
-			if (!positionNearPlayer($items{$item}{pos}, 12) &&
-			    !positionNearPortal($items{$item}{pos}, 10)) {
-				message TF("Gathering: %s (%s)\n", $items{$item}{name}, $items{$item}{binID});
-				gather($item);
-				last;
-			}
-		}
-		$timeout{ai_items_gather_auto}{time} = time;
-	}
+    my $pos = calcPosition( $char );
+    my @candidates = sort { $a->{sort_dist} <=> $b->{sort_dist} } grep {
+               $_
+            && timeOut( $_->{appear_time}, $timeout{ai_items_gather_start}{timeout} )
+            && timeOut( $_->{noloot_time}, $timeout{ai_items_gather_noloot}{timeout} )
+            && !$_->{take_failed}
+            && pickupitems( lc $_->{name} ) > 1
+            && !positionNearPlayer( $_->{pos}, $config{itemsGatherAuto_minPlayerDistance} || 12 )
+            && !positionNearPortal( $_->{pos}, $config{itemsGatherAuto_minPortalDistance} || 10 )
+            && ( $_->{sort_dist} = distance( $pos, $_->{pos} ) || 0.1 )
+        } map {
+        $items{$_}
+        } @itemsID;
+    if ( @candidates ) {
+        message TF( "Gathering: %s (%s)\n", $candidates[0]{name}, $candidates[0]{binID} );
+        gather( $candidates[0]->{ID} );
+    }
 }
 
 ##### ITEMS GATHER #####
@@ -2890,9 +3134,10 @@ sub processItemsGather {
 		my $ID = AI::args->{ID};
 		my ($dist, $myPos);
 
-		if (positionNearPlayer($items{$ID}{pos}, 12)) {
+		if (positionNearPlayer($items{$ID}{pos}, $config{itemsGatherAuto_minPlayerDistance} || 12)) {
 			message TF("Failed to gather %s (%s) : No looting!\n", $items{$ID}{name}, $items{$ID}{binID}), undef, 1;
 			AI::dequeue;
+			$items{$ID}{noloot_time} = time;
 
 		} elsif (timeOut(AI::args->{ai_items_gather_giveup})) {
 			message TF("Failed to gather %s (%s) : Timeout\n", $items{$ID}{name}, $items{$ID}{binID}), undef, 1;
@@ -3197,8 +3442,8 @@ sub processRepairAuto {
 }
 
 sub processFeed {
-	if ($config{pet_autoFeed} && timeOut($timeout{ai_petFeed}) && %pet && $pet{hungry} && ($pet{hungry} <= $config{pet_hunger} || $pet{hungry} <= $config{pet_return})) {
-		if ($pet{hungry} <= $config{pet_return} && %pet && $pet{hungry}) {
+	if ($config{pet_autoFeed} && timeOut($timeout{ai_petFeed}) && %pet && ($pet{hungry} <= $config{pet_hunger} || $pet{hungry} <= $config{pet_return})) {
+		if ($pet{hungry} <= $config{pet_return}) {
 			message TF("Pet hunger reaches the return value.\n");
 			$messageSender->sendPetMenu(3);
 			undef %pet; # todo: instead undef %pet when the actor (our pet) dissapears, this is safer (xkore)

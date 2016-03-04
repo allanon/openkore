@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8678 $
+#  $Id: I18N.pm 8678 2013-09-08 21:15:50Z ya4ept $
 #
 #########################################################################
 ##

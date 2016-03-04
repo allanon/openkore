@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8894 $
+#  $Id: Item.pm 8894 2014-08-21 16:47:22Z allanon $
 #
 #########################################################################
 ##
@@ -166,8 +166,9 @@ sub getMultiple {
 }
 
 ##
-# Actor::Item::bulkEquip(list)
+# Actor::Item::bulkEquip(list,immediate)
 # list: a hash containing slot => item, where slot is "leftHand" or "rightHand", and item is an item identifier as recognized by Actor::Item::get().
+# immediate: send the equip packets immediately (else queue an equip AI task)
 #
 # Equip many items in one batch.
 #
@@ -175,9 +176,10 @@ sub getMultiple {
 # %list = (leftHand => 'Katar', rightHand => 10);
 # Actor::Item::bulkEquip(\%list);
 sub bulkEquip {
-	my $list = $_[0];
+	my ($list,$immediate) = @_;
 	return unless $list && %{$list};
 	my ($item, $rightHand, $rightAccessory);
+	my $old_equip;
 	foreach (keys %{$list}) {
 		error "Wrong Itemslot specified: $_\n",'Actor::Item' if (!exists $equipSlot_rlut{$_});
 		
@@ -188,17 +190,20 @@ sub bulkEquip {
 
 		next unless ($item && $char->{equipment} && (!$char->{equipment}{$_} || $char->{equipment}{$_}{name} ne $item->{name}));
 
-		$item->equipInSlot($_);
+		$old_equip->{$_} = $char->{equipment}{$_} ? $char->{equipment}{$_}{name} : undef;
+		$item->equipInSlot($_, $immediate);
 		
 		$rightHand = $item->{invIndex} if ($_ eq 'rightHand');
 		$rightAccessory = $item->{invIndex} if ($_ eq 'rightAccessory');
 	}
+	return $old_equip;
 }
 
 ##
-# Actor::Item::scanConfigAndEquip(prefix)
+# Actor::Item::scanConfigAndEquip(prefix, immediate)
 #
 # prefix: is used to scan for slots
+# immediate: send the equip packets immediately (else queue an equip AI task)
 #
 # e.g.:
 # <pre>
@@ -206,19 +211,25 @@ sub bulkEquip {
 # will equip
 # equipAuto_1_leftHand Sword
 # </pre>
+#
+# Supports a comma-separated list of items in preferred order. The first item in inventory will be equipped.
 sub scanConfigAndEquip {
 	my $prefix = shift;
+	my $immediate = shift;
 	my %eq_list;
 
 	debug "Scanning config and equipping: $prefix\n";
 
-	# it uses %equipSlot_lut hash keys too, unlike scanConfigAndCheck?
-	foreach my $slot (%equipSlot_lut) {
-		if ($config{"${prefix}_$slot"}){
-			$eq_list{$slot} = $config{"${prefix}_$slot"};
+	foreach my $slot (values %equipSlot_lut) {
+		next if !$config{"${prefix}_$slot"};
+		foreach (split /\s*,\s*/, $config{"${prefix}_$slot"}) {
+			my $item = Actor::Item::get($_);
+			next if !$item;
+			$eq_list{$slot} = $_;
+			last;
 		}
 	}
-	bulkEquip(\%eq_list) if (%eq_list);
+	bulkEquip(\%eq_list, $immediate) if (%eq_list);
 }
 
 ##
@@ -230,12 +241,16 @@ sub scanConfigAndEquip {
 sub scanConfigAndCheck {
 	my $prefix = $_[0];
 	return 0 unless $prefix;
+	return 0 if !$char->{equipment};
 
 	my $count = 0;
 	foreach my $slot (values %equipSlot_lut) {
-		if (exists $config{"${prefix}_$slot"}){
-			my $item = Actor::Item::get($config{"${prefix}_$slot"}, undef, 1);
-			$count++ if ($item && $char->{equipment} && (!$char->{equipment}{$slot} || $char->{equipment}{$slot}{name} ne $item->{name}));
+		next if !$config{"${prefix}_$slot"};
+		foreach (split /\s*,\s*/, $config{"${prefix}_$slot"}) {
+			my $item = Actor::Item::get($_);
+			next if !$item;
+			$count++ if !$char->{equipment}{$slot} || $char->{equipment}{$slot}{name} ne $item->{name};
+			last;
 		}
 	}
 	return $count;
@@ -428,7 +443,7 @@ sub use {
 #
 # Equips item in $slot.
 sub equipInSlot {
-	my ($self,$slot) = @_;
+	my ($self,$slot,$dontqueue) = @_;
 	unless (defined $equipSlot_rlut{$slot}) {
 		error TF("Wrong equip slot specified\n");
 		return 1;
@@ -439,7 +454,7 @@ sub equipInSlot {
 		return 1;
 	}
 	$messageSender->sendEquip($self->{index}, $equipSlot_rlut{$slot});
-	queueEquip(1);
+	queueEquip(1) if !$dontqueue;
 	return 0;
 }
 

@@ -14,8 +14,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7742 $
+#  $Id: Win32.pm 7742 2011-05-26 14:56:17Z windhamwong $
 #
 #########################################################################
 ##

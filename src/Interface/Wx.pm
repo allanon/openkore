@@ -17,8 +17,8 @@
 #  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #  GNU General Public License for more details.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8870 $
+#  $Id: Wx.pm 8870 2014-05-21 23:46:21Z windhamwong $
 #
 #########################################################################
 package Interface::Wx;
@@ -88,7 +88,6 @@ sub OnInit {
 		['initialized',                         sub { $self->onInitialized(@_); }],
 		['ChatQueue::add',                      $onChat],
 		['packet_selfChat',                     $onChat],
-		['packet_mainChat',                     $onChat],
 		['packet_privMsg',                      $onChat],
 		['packet_sentPM',                       $onChat],
 		['mainLoop_pre',                        sub { $self->onUpdateUI(); }],
@@ -581,7 +580,7 @@ sub createMenuBar {
 
 	# Settings menu
 	my $settingsMenu = new Wx::Menu;
-	$self->createSettingsMenu($settingsMenu) if ($self->can('createSettingsMenu'));
+	$self->createSettingsMenu($settingsMenu) if ($self->can('createSettingsMenuz'));
 	$self->addMenu($settingsMenu, T('Reload config.txt'), sub {Commands::run("reload config.txt")}, T('Reload config.txt'));
 	$self->addMenu($settingsMenu, T('Reload All Configs'), sub {Commands::run("reload all")}, T('Reload All Configs'));
 	$settingsMenu->AppendSeparator;
@@ -749,16 +748,7 @@ sub createSplitterContent {
 	$chatLog->addColor("p", 164, 0, 143);
 	$chatLog->addColor("g", 0, 177, 108);
 	$chatLog->addColor("warning", 214, 93, 0);
-	
-	# $page = $notebook->newPage(2, T('Team Chat Log'), 1);
-	# my $TchatLog = $self->{TchatLog} = new Interface::Wx::LogView($page);
-	# $page->set($TchatLog);
-	# $TchatLog->addColor("p", 164, 0, 143);
-	
-	# $page = $notebook->newPage(3, T('Guild Chat Log'), 2);
-	# my $GchatLog = $self->{GchatLog} = new Interface::Wx::LogView($page);
-	# $page->set($GchatLog);
-	# $GchatLog->addColor("g", 0, 177, 108);
+
 
 	## Parallel to the notebook is another sub-splitter
 	my $subSplitter = new Wx::SplitterWindow($splitter, 583,
@@ -1312,24 +1302,12 @@ sub openNpcTalk {
 
 sub onManual {
 	my $self = shift;
-	my $url;
-	if ($config{'manualURL'}) {
-		$url = $config{'manualURL'};
-	} else {
-		$url = 'http://wiki.openkore.com/index.php?title=Manual';
-	}
-	launchURL($url);
+	launchURL('http://wiki.openkore.com/index.php?title=Manual');
 }
 
 sub onForum {
 	my $self = shift;
-	my $url;
-	if ($config{'forumURL'}) {
-		$url = $config{'forumURL'};
-	} else {
-		$url = 'http://forums.openkore.com';
-	}
-	launchURL($url);
+	launchURL('http://forums.openkore.com/');
 }
 
 sub onItemListActivate {
@@ -1398,8 +1376,6 @@ sub onChatAdd {
 	} elsif ($hook eq "packet_selfChat") {
 		# only display this message if it's a real self-chat
 		$self->{chatLog}->add("[$tmpdate[2]:$tmpdate[1]] $params->{user}: $params->{msg}\n", "selfchat") if ($params->{user});
-	} elsif ($hook eq "packet_mainChat") {
-		$self->{chatLog}->add("[$tmpdate[2]:$tmpdate[1]] $params->{MsgUser}: $params->{Msg}\n", "schat") if ($params->{MsgUser});
 	} elsif ($hook eq "packet_privMsg") {
 		$self->{chatLog}->add("([$tmpdate[2]:$tmpdate[1]] From: $params->{privMsgUser}): $params->{privMsg}\n", "pm");
 	} elsif ($hook eq "packet_sentPM") {

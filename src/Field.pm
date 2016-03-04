@@ -252,7 +252,7 @@ sub loadFile {
 	my ($fieldData, $width, $height);
 	if ($filename =~ /\.gz$/) {
 		use bytes;
-		no encoding 'utf8';
+		no utf8;
 
 		my $gz = gzopen($filename, 'rb');
 		if (!$gz) {

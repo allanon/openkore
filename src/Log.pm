@@ -112,9 +112,9 @@ use Time::HiRes;
 use base qw(Exporter);
 
 use Modules 'register';
-use Globals qw(%config $interface %consoleColors $field);
+use Globals qw(%config $interface %consoleColors $field $char);
 use Utils::DataStructures qw(binAdd existsInList);
-use Utils qw(binAdd existsInList getFormattedDate);
+use Utils qw(binAdd existsInList getFormattedDate calcPosition);
 
 our @EXPORT_OK = qw(message warning error debug);
 
@@ -219,9 +219,11 @@ sub processMsg {
 		if ($consoleVar->{$domain}) {
 			if ($interface) {
 				$message = "[$domain] " . $message if ($config{showDomain});
-				my (undef, $microseconds) = Time::HiRes::gettimeofday;
-				$microseconds = substr($microseconds, 0, 2);
-				my $message2 = "[".getFormattedDate(int(time)).".$microseconds] ".$message;
+				my ($time, $microseconds) = Time::HiRes::gettimeofday;
+				$microseconds = int $microseconds / 10000;
+				my $curpos = $char && calcPosition( $char );
+				$curpos = $curpos ? [ $curpos->{x}, $curpos->{y} ] : [ 0, 0 ];
+				my $message2 = sprintf "[%20s.%02d] [%3d,%3d] %s", getFormattedDate($time), $microseconds, @$curpos, $message;
 				if ($config{showTime}) {
 					$interface->writeOutput($type, $message2, $domain);
 				} else {
@@ -229,7 +231,7 @@ sub processMsg {
 				}
 
 				if ($config{logConsole} &&
-					open(F, ">>:utf8", "$Settings::logs_folder/console.txt")) {
+					open(F, ">>:utf8", "$Settings::logs_folder/console_$config{username}_$config{char}.txt")) {
 					print F $message2;
 					close(F);
 				}

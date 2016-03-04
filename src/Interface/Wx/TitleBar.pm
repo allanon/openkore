@@ -14,8 +14,8 @@
 #  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #  GNU General Public License for more details.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7226 $
+#  $Id: TitleBar.pm 7226 2010-04-01 22:34:36Z eternalharvest $
 #
 #########################################################################
 package Interface::Wx::TitleBar;

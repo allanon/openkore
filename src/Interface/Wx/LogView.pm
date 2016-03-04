@@ -18,8 +18,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7916 $
+#  $Id: LogView.pm 7916 2011-12-25 11:30:48Z farrainbow $
 #
 #########################################################################
 package Interface::Wx::LogView;

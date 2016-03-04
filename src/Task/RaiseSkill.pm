@@ -23,7 +23,7 @@ use base 'Task::Raise';
 
 use Carp::Assert;
 use Modules 'register';
-use Globals qw(%config $net $char $messageSender);
+use Globals qw(%config $net $char $messageSender @skillsID);
 use Skill;
 use Log qw(message debug error);
 use Translation qw(T TF);
@@ -63,7 +63,7 @@ sub initQueue {
 	@queue
 }
 
-sub canRaise { $char && $char->{points_skill} }
+sub canRaise { $char && $char->{points_skill} && @skillsID }
 
 sub raise {
 	my ($self, $skill) = @_;

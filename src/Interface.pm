@@ -29,9 +29,10 @@ use Time::HiRes qw(usleep);
 use utf8;
 
 use Modules 'register';
-use Globals qw(%config $quit);
+use Globals qw(%config $quit $net);
 use Translation qw(T TF);
 use Utils::Exceptions;
+use Network;
 
 
 ##
@@ -70,7 +71,9 @@ sub loadInterface {
 sub mainLoop {
 	my $self = shift;
 	while (!$quit) {
-		usleep($config{sleepTime} || 10000);
+		my $sleep = $config{sleepTime} || 10000;
+        $sleep = $config{sleepTimeOffline} || $sleep * 10 if $net && ( !$net->getState || $net->getState != Network::IN_GAME );
+		usleep($sleep);
 		$self->iterate();
 		main::mainLoop();
 	}

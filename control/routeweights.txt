@@ -28,9 +28,30 @@ PORTAL 20
 # by using a NPC. Only change this, if you exactly know what you're doing!
 NPC 200
 
-# Maps where you can exit to the same place you came from,
-# which confuses routing if added to portals thoughtlessly.
-bat_room 10000
-moc_para01 10000
-
 # Add your map weights here. Format: <mapname> <weight>
+ra_fild09 9999
+prt_fild05 8000
+#prt_fild08 800
+gef_fild04 800
+#gef_fild07 800
+#gef_fild08 800
+yuno_fild09 9999
+moc_fild19 800
+gl_knt01 1200
+prt_fild10 9999
+gef_fild03 800
+
+# Dead branch griefing.
+#gef_fild07 9999
+
+# Walk through prt_fild05 instead of mjolnir_06 on the way to mjolnir_07.
+mjolnir_06 500
+
+# The maze is annoying.
+prt_maze01 9999
+
+# Try to make the bot not want to use the shortcut through cmd_fild08 from cmd_fild06.
+cmd_fild08 9999
+
+# High Orcs is a VIP-only map.
+gef_fild14 9999

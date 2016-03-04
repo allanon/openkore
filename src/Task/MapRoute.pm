@@ -187,6 +187,7 @@ sub iterate {
 				my $task = new Task::TalkNPC(
 					x => $self->{mapSolution}[0]{pos}{x},
 					y => $self->{mapSolution}[0]{pos}{y},
+					nameID => $portals_lut{$from}{source}{nameID},
 					sequence => $self->{mapSolution}[0]{steps});
 				$self->setSubtask($task);
 			} else {
@@ -214,11 +215,12 @@ sub iterate {
 				x => $self->{mapSolution}[0]{pos}{x},
 				y => $self->{mapSolution}[0]{pos}{y},
 				maxTime => $self->{maxTime},
-				distFromGoal => $dist,
+				distFromGoal => Utils::max(1, $dist - $self->{walk_tries}),
 				avoidWalls => $self->{avoidWalls},
 				solution => \@solution
 			);
 			$self->setSubtask($task);
+			$self->{walk_tries}++;
 
 		} else {
 			# Error, NPC is not reachable from current pos

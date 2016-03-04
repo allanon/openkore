@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8678 $
+#  $Id: XKoreProxy.pm 8678 2013-09-08 21:15:50Z ya4ept $
 #
 #########################################################################
 # Note: the difference between XKore2 and XKoreProxy is that XKore2 can
@@ -74,7 +74,7 @@ sub new {
 	$self->{gotError} = 0;
 	$self->{waitingClient} = 1;
 	{
-		no encoding 'utf8';
+		no utf8;
 		$self->{packetPending} = '';
 		$clientBuffer = '';
 	}
@@ -294,7 +294,7 @@ sub checkProxy {
 			$self->serverDisconnect();
 		}
 
-		close $self->{proxy} if $self->{proxy};
+		close($self->{proxy});
 		$self->{waitClientDC} = undef;
 		debug "Removing pending packet from queue\n" if (defined $self->{packetPending});
 		$self->{packetPending} = '';
@@ -416,7 +416,7 @@ sub modifyPacketIn {
 	# packet replay check: reset status for every different packet received
 	if ($self->{packetPending} && ($self->{packetPending} ne $msg)) {
 		debug "Removing pending packet from queue\n";
-		use bytes; no encoding 'utf8';
+		use bytes; no utf8;
 		delete $self->{replayTimeout};
 		$self->{packetPending} = '';
 		$self->{packetReplayTrial} = 0;
@@ -430,7 +430,7 @@ sub modifyPacketIn {
 	}
 
 	if ($switch eq "0069") {
-		use bytes; no encoding 'utf8';
+		use bytes; no utf8;
 
 		# queue the packet as requiring client's response in time
 		$self->{packetPending} = $msg;
@@ -517,7 +517,7 @@ sub modifyPacketIn {
 
 sub modifyPacketOut {
 	my ($self, $msg) = @_;
-	use bytes; no encoding 'utf8';
+	use bytes; no utf8;
 
 	return undef if (length($msg) < 1);
 

@@ -13,8 +13,8 @@
 #  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #  GNU General Public License for more details.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7176 $
+#  $Id: Page.pm 7176 2010-03-16 05:40:18Z eternalharvest $
 #
 #########################################################################
 ##

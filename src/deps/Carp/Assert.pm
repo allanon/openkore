@@ -20,7 +20,7 @@ BEGIN {
 }
 
 # constant.pm, alas, adds too much load time (yes, I benchmarked it)
-sub REAL_DEBUG  ()  { 1 }       # CONSTANT
+sub REAL_DEBUG  ()  { 0 }       # CONSTANT
 sub NDEBUG      ()  { 0 }       # CONSTANT
 
 # Export the proper DEBUG flag according to if :NDEBUG is set.

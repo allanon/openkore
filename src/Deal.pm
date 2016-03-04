@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 6971 $
+#  $Id: Deal.pm 6971 2009-12-10 23:40:38Z Technologyguild $
 #
 #########################################################################
 ##

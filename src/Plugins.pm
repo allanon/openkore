@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8569 $
+#  $Id: Plugins.pm 8569 2013-05-13 23:42:27Z farrainbow $
 #
 #########################################################################
 ##
@@ -29,6 +29,7 @@ use strict;
 use warnings;
 use Time::HiRes qw(time sleep);
 use Exception::Class ('Plugin::LoadException', 'Plugin::DeniedException');
+use UNIVERSAL;
 
 use Modules 'register';
 use Globals;
@@ -36,10 +37,9 @@ use Utils qw(stringToQuark quarkToString);
 use Utils::DataStructures qw(binAdd existsInList);
 use Utils::ObjectList;
 use Utils::Exceptions;
-use Log qw(message warning);
+use Log qw(message warning error);
 use Translation qw(T TF);
 use Settings qw(%sys);
-
 
 #############################
 ### CATEGORY: Variables
@@ -152,7 +152,22 @@ sub load {
 
 		undef $!;
 		undef $@;
-		if (!defined(do $file)) {
+		my $r;
+		if ($file =~ m{([^/]+)\.spl$}) {
+			my $package = $1;
+			$package =~ s/\W/_/gs;
+			$r = eval qq{
+				package OpenKore::Plugins::$package;
+				use Plugins::Symbols;
+				my \$r = do \$file;
+				die \$@ if \$@;
+				Plugins::register_simple();
+				!defined(\$r) ? \$! || 1 : \$r;
+			};
+		} else {
+			$r = do $file;
+		}
+		if (!defined($r)) {
 			if ($@) {
 				Plugin::LoadException->throw(TF("Plugin contains syntax errors:\n%s", $@));
 			} else {
@@ -260,6 +275,123 @@ sub register {
 
 	binAdd(\@plugins, \%plugin_info);
 	return 1;
+}
+
+
+##
+# void Plugins::register_simple(void)
+# Returns: 1 if the plugin has been successfully registered, 0 if a plugin with the same name is already registered.
+#
+# Plugins may call this function instead of register(). It will load register the plugin with:
+#  * a default name (generated from the plugin's package name)
+#  * the $description variable from the plugin package, or else "no description provided"
+#  * an unload and reload handler that deletes registered hooks and commands
+# This function also auto-registers all package methods which start with "hook_" as hooks.
+# This function also auto-registers all package methods which start with "cmd_" as commands.
+sub register_simple {
+    my ( $package ) = caller;
+
+    no strict 'refs';
+    my $desc = ${"${package}::description"} || 'no description provided';
+    use strict 'refs';
+
+    my $name   = package_name_to_plugin_name( $package );
+    my $hooks  = addHooks( @{ package_to_hooks( $package ) } );
+    my $cmds   = Commands::register( @{ package_to_commands( $package, $name ) } );
+
+    my $unload = sub { message( TF( "Unloading plugin %s...\n", $name ), "plugins" );delHooks( $hooks );Commands::unregister( $cmds ); };
+    my $reload = sub { message( TF( "Reloading plugin %s...\n", $name ), "plugins" );delHooks( $hooks );Commands::unregister( $cmds ); };
+
+    register( $name, $desc, $unload, $reload );
+}
+
+
+sub package_to_commands {
+    my ( $package, $plugin_name ) = @_;
+    $plugin_name ||= $package;
+    my @methods = grep {/^cmd_/} @{ list_package_methods( $package ) };
+    my $map = {};
+    foreach my $method ( @methods ) {
+        my $cmd_sub = \&{"${package}::$method"};
+        my ( undef, $cmd, $subcmd ) = split '_', $method, 3;
+        $map->{$cmd}->{ $subcmd || '' } = $cmd_sub;
+    }
+    [ map { [ $_, "$_ command from the $plugin_name plugin", sub { dispatch_command( $map, $_[0], Utils::parseArgs( $_[1] ) ) } ] } keys %$map ];
+}
+
+sub dispatch_command {
+    my $cmds = shift;
+    my $cmd  = shift;
+    if ( @_ && $cmds->{$cmd}->{ $_[0] } ) {
+        my $subcmd = shift;
+        $cmds->{$cmd}->{$subcmd}->( @_ );
+    } elsif ( $cmds->{$cmd}->{''} ) {
+        $cmds->{$cmd}->{''}->( @_ );
+    } else {
+        error "Command [$cmd] does not accept parameters [@_].\n";
+        error "Known sub-commands for this command are:\n";
+        error "  $cmd $_\n" foreach sort keys %{ $cmds->{$cmd} };
+    }
+}
+
+sub package_to_hooks {
+    my ( $package ) = @_;
+    my @methods = grep {/^hook_/} @{ list_package_methods( $package ) };
+    my $hooks = [];
+    foreach my $method ( @methods ) {
+        my $hook_sub   = \&{"${package}::$method"};
+        my $sub        = sub { $hook_sub->($_[1]); };
+        my $hook_names = method_name_to_hook_names( $method );
+        push @$hooks, [ $_ => $sub ] foreach @$hook_names;
+    }
+    $hooks;
+}
+
+
+sub list_package_methods {
+    my ( $package ) = @_;
+
+    no strict 'refs';
+    my $methods = [ sort keys %{"${package}::"} ];
+    use strict 'refs';
+
+    $methods;
+}
+
+
+sub method_name_to_hook_names {
+    my ( $name ) = @_;
+    my $hooks = [];
+    $name =~ s/^hook_//;
+    push @$hooks, $name;
+    my $token_map = { slash => '/', colon => ':' };
+    my @tokens = split '_', $name;
+    @tokens = map { $token_map->{$_} || $_ } @tokens;
+    $name = join '_', @tokens;
+    $name =~ s/_?(\W)_?/$1/g;
+    push @$hooks, $name if $name ne $hooks->[0];
+    $hooks;
+}
+
+
+##
+# String Plugins::package_name_to_plugin_name(String package_name)
+# package_name: A package name (eg, OpenKore::Plugins::ABCPlugin::Part1).
+# Returns: Lowercase version of the package name.
+#
+# This is used by register() to generate the plugin name if no name was specified.
+# Output will always match the regular expression /^\w+$/.
+# For example, 'OpenKore::Plugins::ABCPlugin::Part1' will become 'abc_plugin_part_1'.
+sub package_name_to_plugin_name {
+    my ( $name ) = @_;
+    $name =~ s/^((openkore|plugins?)::)*//i;
+    $name =~ s/\W+/_/g;
+    $name =~ s/([A-Z])([A-Z]*)([A-Z])/$1.lc($2).$3/eg;
+    $name =~ s/([A-Z])/'_'.lc($1)/eg;
+    $name =~ s/(\d+)/_${1}_/g;
+    $name =~ s/__/_/g;
+    $name =~ s/^_|_$//g;
+    $name;
 }
 
 

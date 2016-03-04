@@ -38,7 +38,7 @@ use Plugins;
 use Network;
 use Log qw(warning debug);
 use Translation qw(T TF);
-use Utils qw(timeOut);
+use Utils qw(timeOut calcPosition);
 use Utils::Exceptions;
 
 # Error constants.
@@ -74,7 +74,7 @@ sub new {
 	my $self = $class->SUPER::new(@_, autostop => 1, autofail => 1, mutexes => MUTEXES);
 
 	unless ($args{actor}->isa('Actor') and $args{x} != 0 and $args{y} != 0) {
-		ArgumentException->throw(error => "Invalid arguments.");
+		ArgumentException->throw(error => "Task::Move: Invalid arguments.");
 	}
 
 	$self->{$_} = $args{$_} for qw(actor x y);
@@ -143,7 +143,9 @@ sub iterate {
 	# Stop if we've timed out.
 	} elsif (timeOut($self->{giveup})) {
 		debug "Move $self->{actor} - timeout\n", "move";
-		$self->setError(TOO_LONG, TF("%s tried too long to move", $self->{actor}));
+		$self->setError(TOO_LONG, TF("%s tried too long to move from (%d,%d) to (%d,%d) - trying to unstick", $self->{actor}, @{calcPosition($self->{actor})}{qw(x y)}, @{$self}{qw(x y)}));
+        $self->{actor}->sendAttackStop;
+		$self->{actor}->sendMove(@{$self}{qw(x y)});
 
 	} elsif (timeOut($self->{retry})) {
 		debug "Move $self->{actor} - (re)trying\n", "move";

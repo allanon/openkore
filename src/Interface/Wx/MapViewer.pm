@@ -15,8 +15,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8259 $
+#  $Id: MapViewer.pm 8259 2012-10-29 19:57:24Z farrainbow $
 #
 #########################################################################
 package Interface::Wx::MapViewer;

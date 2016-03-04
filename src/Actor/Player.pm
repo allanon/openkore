@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7247 $
+#  $Id: Player.pm 7247 2010-04-26 08:58:03Z manticora $
 #
 #########################################################################
 ##

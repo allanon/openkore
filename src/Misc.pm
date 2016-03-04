@@ -1,3 +1,4 @@
+# NOTE: To commit this, Globals.pm and functions.pl must also be committed.
 #########################################################################
 #  OpenKore - Miscellaneous functions
 #
@@ -8,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8922 $
+#  $Id: Misc.pm 8922 2014-10-26 00:26:09Z windhamwong $
 #
 #########################################################################
 ##
@@ -300,11 +301,7 @@ sub configModify {
 		}
 		
 		if ($config{$key} eq $val) {
-			if ($val) {
-				message TF("Config '%s' is already %s\n", $key, $val), "info";
-			}else{
-				message TF("Config '%s' is already *None*\n", $key), "info";
-			}
+			message TF("Config '%s' is already %s\n", $key, $val), "info";
 			return;
 		}
 		
@@ -430,7 +427,7 @@ sub visualDump {
 	my $puncations = quotemeta '~!@#$%^&*()_-+=|\"\'';
 
 	# doesn't work right with debugPacket_sent
-	#no encoding 'utf8';
+	#no utf8;
 	#use bytes;
 
 	$dump = "================================================\n";
@@ -1245,7 +1242,13 @@ sub charSelectScreen {
 	}
 	
 	if ($mode eq "create") {
-		while (1) {
+		my $created = 0;
+		if ( $config{createOptions} ) {
+			my @args = parseArgs( $config{createOptions} );
+			$timeout{charlogin}{time} = time;
+			$created = createCharacter( @args ) if @args >= 2;
+		}
+		while (!$created) {
 			my $message;
 			if ($messageSender->{char_create_version}) {
 				$message = T("Please enter the desired properties for your characters, in this form:\n" .
@@ -1267,7 +1270,7 @@ sub charSelectScreen {
 
 				message TF("Creating character \"%s\" in slot \"%s\"...\n", $args[1], $args[0]), "connection";
 				$timeout{charlogin}{time} = time;
-				last if (createCharacter(@args));
+				$created = createCharacter(@args);
 			}
 		}
 
@@ -1357,10 +1360,13 @@ sub checkFollowMode {
 #
 # Checks whether a monster is "clean" (not being attacked by anyone).
 sub checkMonsterCleanness {
+	$Globals::unclean_reason = "clean!";
 	return 1 if (!$config{attackAuto});
 	my $ID = $_[0];
 	return 1 if $playersList->getByID($ID) || $slavesList->getByID($ID);
 	my $monster = $monstersList->getByID($ID);
+
+	$Globals::unclean_reason = "hidden",return 0 if $monster->{statuses}->{EFFECTSTATE_BURROW} && !$config{attackAuto_hidden};
 
 	# If party attacked monster, or if monster attacked/missed party
 	if ($config{attackAuto_party} && ($monster->{dmgFromParty} > 0 || $monster->{missedFromParty} > 0 || $monster->{dmgToParty} > 0 || $monster->{missedToParty} > 0)) {
@@ -1374,10 +1380,10 @@ sub checkMonsterCleanness {
 		return 1 if ($monster->{dmgFromYou} || $monster->{missedFromYou});
 		
 		# If others attacked the monster then always drop it, wether it attacked us or not!
-		return 0 if (($monster->{dmgFromPlayer} && %{$monster->{dmgFromPlayer}})
-			  || ($monster->{missedFromPlayer} && %{$monster->{missedFromPlayer}})
-			  || (($monster->{castOnByPlayer}) && %{$monster->{castOnByPlayer}})
-			  || (($monster->{castOnToPlayer}) && %{$monster->{castOnToPlayer}}));
+		$Globals::unclean_reason = "attacked by " . join( ', ', keys %{ $monster->{dmgFromPlayer}    } ),return 0 if $monster->{dmgFromPlayer}    && %{ $monster->{dmgFromPlayer} };
+		$Globals::unclean_reason = "attacked by " . join( ', ', keys %{ $monster->{missedFromPlayer} } ),return 0 if $monster->{missedFromPlayer} && %{ $monster->{missedFromPlayer} };
+		$Globals::unclean_reason = "attacked by " . join( ', ', keys %{ $monster->{castOnByPlayer}   } ),return 0 if $monster->{castOnByPlayer}   && %{ $monster->{castOnByPlayer} };
+		$Globals::unclean_reason = "attacked by " . join( ', ', keys %{ $monster->{castOnToPlayer}   } ),return 0 if $monster->{castOnToPlayer}   && %{ $monster->{castOnToPlayer} };
 	}
 	
 	# If monster attacked/missed you
@@ -1401,6 +1407,7 @@ sub checkMonsterCleanness {
 	if (objectInsideSpell($monster)) {
 		# Prohibit attacking this monster in the future
 		$monster->{dmgFromPlayer}{$char->{ID}} = 1;
+		$Globals::unclean_reason = "objectInsideSpell";
 		return 0;
 	}
 
@@ -1437,8 +1444,11 @@ sub checkMonsterCleanness {
 		# if we haven't already attacked the monster.
 		if ($monster->{dmgFromYou} || $monster->{missedFromYou}) {
 			return 1;
+		} elsif (objectIsMovingTowardsPlayer($monster)) {
+			$Globals::unclean_reason = "objectIsMovingTowardsPlayer";
+			return 0;
 		} else {
-			return !objectIsMovingTowardsPlayer($monster);
+			return 1;
 		}
 	}
 
@@ -1450,6 +1460,8 @@ sub checkMonsterCleanness {
 	}
 	# If you haven't attacked the monster yet, it's unclean.
 
+	return 1;
+	$Globals::unclean_reason = "haven't attacked yet";
 	return 0;
 }
 
@@ -1746,7 +1758,6 @@ sub inInventory {
 sub inventoryItemRemoved {
 	my ($invIndex, $amount) = @_;
 
-	return if $amount == 0;
 	my $item = $char->inventory->get($invIndex);
 	if (!$char->{arrow} || ($item && $char->{arrow} != $item->{index})) {
 		# This item is not an equipped arrow
@@ -1789,9 +1800,9 @@ sub monsterName {
 # Resolve the name of a simple item
 sub itemNameSimple {
 	my $ID = shift;
-	return T("Unknown") unless defined($ID);
-	return T("None") unless $ID;
-	return $items_lut{$ID} || T("Unknown #")."$ID";
+	return 'Unknown' unless defined($ID);
+	return 'None' unless $ID;
+	return $items_lut{$ID} || "Unknown #$ID";
 }
 
 ##
@@ -1917,12 +1928,12 @@ sub storageGet {
 sub headgearName {
 	my ($lookID) = @_;
 
-	return T("Nothing") if $lookID == 0;
+	return "Nothing" if $lookID == 0;
 
 	my $itemID = $headgears_lut[$lookID];
 
 	if (!defined($itemID)) {
-		return T("Unknown lookID") . $lookID;
+		return "Unknown lookID $lookID";
 	}
 
 	return main::itemName({nameID => $itemID});
@@ -2002,15 +2013,15 @@ sub lookAtPosition {
 sub manualMove {
 	my ($dx, $dy) = @_;
 
-	# Stop following if necessary
-	if ($config{'follow'}) {
-		configModify('follow', 0);
-		AI::clear('follow');
-	}
-
 	# Stop moving if necessary
 	AI::clear(qw/move route mapRoute/);
-	main::ai_route($field->baseName, $char->{pos_to}{x} + $dx, $char->{pos_to}{y} + $dy);
+
+	# Try to just issue the move, if the move is short.
+	if ( $dx * $dx + $dy * $dy < 50 ) {
+		$char->sendMove( $char->{pos_to}->{x} + $dx, $char->{pos_to}->{y} + $dy );
+	} else {
+		main::ai_route($field->baseName, $char->{pos_to}{x} + $dx, $char->{pos_to}{y} + $dy);
+	}
 }
 
 ##
@@ -2157,9 +2168,14 @@ sub mon_control {
 # Returns the pickupitems.txt settings for item name $name.
 # If $name has no specific settings, use 'all'.
 sub pickupitems {
-	my ($name) = @_;
-
-	return ($pickupitems{lc($name)} ne '') ? $pickupitems{lc($name)} : $pickupitems{all};
+	my $name = lc shift;
+	my $pui  = $pickupitems{$name};
+	$pui ||= ( map { $pickupitems_r{$_} } grep { $name =~ /$_/ } keys %pickupitems_r )[0];
+	$pui ||= $pickupitems{all};
+	if ( $pui->{weight} && $char && $char->{weight_max} ) {
+		return 0 if $char->{weight} / $char->{weight_max} >= $pui->{weight} / 100;
+	}
+	return $pui->{flag};
 }
 
 sub positionNearPlayer {
@@ -2256,7 +2272,7 @@ sub relog {
 	$timeout_ex{'master'}{'time'} = time;
 	$timeout_ex{'master'}{'timeout'} = $timeout;
 	$net->serverDisconnect() if ($net);
-	message TF("Relogging in %d seconds...\n", $timeout), "connection" unless $silent;
+	message TF("Relogging in %d seconds, at %02d:%02d:%02d...\n", $timeout, (localtime(time+$timeout))[2,1,0]), "connection" unless $silent;
 }
 
 ##
@@ -2271,7 +2287,6 @@ sub relog {
 sub sendMessage {
 	my ($sender, $type, $msg, $user) = @_;
 	my ($j, @msgs, $oldmsg, $amount, $space);
-	my $msgMaxLen = $config{'message_length_max'} || 80;
 
 	@msgs = split /\\n/, $msg;
 	for ($j = 0; $j < @msgs; $j++) {
@@ -2284,17 +2299,17 @@ sub sendMessage {
 				$msg[$i] = " ";
 				$space = 1;
 			}
-			if (length($msg[$i]) > $msgMaxLen) {
-				while (length($msg[$i]) >= $msgMaxLen) {
+			if (length($msg[$i]) > $config{'message_length_max'}) {
+				while (length($msg[$i]) >= $config{'message_length_max'}) {
 					$oldmsg = $msg;
 					if (length($msg)) {
-						$amount = $msgMaxLen;
+						$amount = $config{'message_length_max'};
 						if ($amount - length($msg) > 0) {
-							$amount = $msgMaxLen - 1;
+							$amount = $config{'message_length_max'} - 1;
 							$msg .= " " . substr($msg[$i], 0, $amount - length($msg));
 						}
 					} else {
-						$amount = $msgMaxLen;
+						$amount = $config{'message_length_max'};
 						$msg .= substr($msg[$i], 0, $amount);
 					}
 					sendMessage_send($sender, $type, $msg, $user);
@@ -2302,7 +2317,7 @@ sub sendMessage {
 					undef $msg;
 				}
 			}
-			if (length($msg[$i]) && length($msg) + length($msg[$i]) <= $msgMaxLen) {
+			if (length($msg[$i]) && length($msg) + length($msg[$i]) <= $config{'message_length_max'}) {
 				if (length($msg)) {
 					if (!$space) {
 						$msg .= " " . $msg[$i];
@@ -2340,7 +2355,7 @@ sub sendMessage_send {
 			msg => $msg,
 			user => $user
 		);
-		push @lastpm, {%lastpm} if ($user !~ '#\w+');
+		push @lastpm, {%lastpm};
 		$sender->sendPrivateMsg($user, $msg);
 	} elsif ($type eq "k") {
 		$sender->injectMessage($msg);
@@ -2612,6 +2627,10 @@ sub updateDamageTables {
 			if ($config{teleportAuto_atkMiss} && $monster->{atkMiss} >= $config{teleportAuto_atkMiss}) {
 				message T("Teleporting because of attack miss\n"), "teleport";
 				useTeleport(1);
+#				message "Dropping target because of attack miss\n";
+#				$char->sendAttackStop;
+#				$char->dequeue;
+				$monster->{atkMiss} = 0;
 			}
 			if ($config{teleportAuto_atkCount} && $monster->{numAtkFromYou} >= $config{teleportAuto_atkCount}) {
 				message TF("Teleporting after attacking a monster %d times\n", $config{teleportAuto_atkCount}), "teleport";
@@ -2717,7 +2736,7 @@ sub updateDamageTables {
 						if (!$ignore) {
 							# Change target to closer aggressive monster
 							message TF("Change target to aggressive : %s (%s)\n", $monster->name, $monster->{binID});
-							stopAttack();
+							$char->sendAttackStop;
 							AI::dequeue;
 							AI::dequeue if (AI::action eq "route");
 							AI::dequeue;
@@ -2730,7 +2749,7 @@ sub updateDamageTables {
 
 					# Mob-training, stop attacking the monster if it has been attacking you
 					message TF("%s (%s) has been provoked, searching another monster\n", $monster->{name}, $monster->{binID});
-					stopAttack();
+					$char->sendAttackStop;
 					AI::dequeue();
 				}
 
@@ -2779,17 +2798,18 @@ sub updateDamageTables {
 						$monster, $player, $damage), "teleport";
 					$teleport = 1;
 
-				} elsif ($config{$player->{configPrefix}.'teleportAuto_maxDmg'} && $damage >= $config{$player->{configPrefix}.'teleportAuto_maxDmg'}
+				} elsif ($config{$player->{configPrefix}.'teleportAuto_maxDmg'}
+				      && ($config{"$player->{configPrefix}teleportAuto_maxDmg"} =~ /^(\d+)%$/o ? 100 * $damage / $char->{hp_max} >= $1 : $damage >= $config{"$player->{configPrefix}teleportAuto_maxDmg"})
 				      && !$player->statusActive('EFST_ILLUSION')
 				      && !($config{$player->{configPrefix}.'teleportAuto_maxDmgInLock'} && $field->baseName eq $config{lockMap})) {
-					message TF("%s hit %s for more than %d dmg. Teleporting...\n",
+					message TF("%s hit %s for more than %s dmg. Teleporting...\n",
 						$monster, $player, $config{$player->{configPrefix}.'teleportAuto_maxDmg'}), "teleport";
 					$teleport = 1;
 
 				} elsif ($config{$player->{configPrefix}.'teleportAuto_maxDmgInLock'} && $field->baseName eq $config{lockMap}
-				      && $damage >= $config{$player->{configPrefix}.'teleportAuto_maxDmgInLock'}
+				      && ($config{"$player->{configPrefix}teleportAuto_maxDmgInLock"} =~ /^(\d+)%$/o ? 100 * $damage / $char->{hp_max} >= $1 : $damage >= $config{"$player->{configPrefix}teleportAuto_maxDmgInLock"})
 				      && !$player->statusActive('EFST_ILLUSION')) { 
-					message TF("%s hit %s for more than %d dmg in lockMap. Teleporting...\n",
+					message TF("%s hit %s for more than %s dmg in lockMap. Teleporting...\n",
 						$monster, $player, $config{$player->{configPrefix}.'teleportAuto_maxDmgInLock'}), "teleport";
 					$teleport = 1;
 
@@ -3197,18 +3217,23 @@ sub getBestTarget {
 	foreach (@{$possibleTargets}) {
 		my $monster = $monsters{$_};
 		my $pos = calcPosition($monster);
-		next if (positionNearPlayer($pos, $playerDist)
-			|| positionNearPortal($pos, $portalDist)
-		);
-		if ((my $control = mon_control($monster->{name},$monster->{nameID}))) {
-			next if ( ($control->{attack_auto} == -1)
-				|| ($control->{attack_lvl} ne "" && $control->{attack_lvl} > $char->{lv})
-				|| ($control->{attack_jlvl} ne "" && $control->{attack_jlvl} > $char->{lv_job})
-				|| ($control->{attack_hp}  ne "" && $control->{attack_hp} > $char->{hp})
-				|| ($control->{attack_sp}  ne "" && $control->{attack_sp} > $char->{sp})
-				|| ($control->{attack_auto} == 3 && ($monster->{dmgToYou} || $monster->{missedYou} || $monster->{dmgFromYou}))
-				|| ($control->{attack_auto} == 0 && !($monster->{dmgToYou} || $monster->{missedYou}))
-			);
+		
+		# Avoid kill stealing.
+		next if positionNearPlayer($pos, $playerDist);
+
+		# Avoid accidentally running into portals.
+		next if positionNearPortal($pos, $portalDist);
+
+		# Obey mon_control limitations.
+		my $control = mon_control( $monster->{name}, $monster->{nameID} );
+		if ( $control ) {
+			next if $control->{attack_auto} == -1;
+			next if $control->{attack_lvl} ne "" && $control->{attack_lvl} > $char->{lv};
+			next if $control->{attack_jlvl} ne "" && $control->{attack_jlvl} > $char->{lv_job};
+			next if $control->{attack_hp} ne "" && $control->{attack_hp} > $char->{hp};
+			next if $control->{attack_sp} ne "" && $control->{attack_sp} > $char->{sp};
+			next if $control->{attack_auto} == 3 && ( $monster->{dmgToYou} || $monster->{missedYou} || $monster->{dmgFromYou} );
+			next if $control->{attack_auto} == 0 && !( $monster->{dmgToYou} || $monster->{missedYou} );
 		}
 		if ($config{'attackCanSnipe'}) {
 			if (!checkLineSnipable($myPos, $pos)) {
@@ -3378,7 +3403,7 @@ sub skillUseNoDamage_string {
 		$skillName,
 		T('on'),
 		$target->nameString($source),
-		($skillID == 28) ? ' ' . TF("(Gained: %s hp)", $amount) : ($amount) ? ' ' . TF("(Lv: %s)", $amount) : '');
+		($skillID == 28 || $skillID == 720) ? ' ' . TF("(Gained: %s hp)", $amount) : ($amount) ? ' ' . TF("(Lv: %s)", $amount) : '');
 }
 
 sub status_string {
@@ -3711,7 +3736,7 @@ sub getActorName {
 	my $id = shift;
 
 	if (!$id) {
-		return T("Nothing");
+		return 'Nothing';
 	} else {
 		my $hash = Actor::get($id);
 		return $hash->nameString;
@@ -3817,6 +3842,16 @@ sub checkSelfCondition {
 		}
 	}
 
+    if ($config{"${prefix}_conf"}) {
+        my ( $k, $v ) = split /\s+/, $config{"${prefix}_conf"}, 2;
+        return 0 if $config{$k} !~ $v;
+    }
+
+    if ($config{$prefix."_notConf"}) {
+        my ( $k, $v ) = split /\s+/, $config{$prefix."_notConf"}, 2;
+        return 0 if $config{$k} =~ $v;
+    }
+
 	if ($config{$prefix."_homunculus"} =~ /\S/) {
 		return 0 if (!!$config{$prefix."_homunculus"}) ^ ($char->{homunculus} && !$char->{homunculus}{state});
 	}
@@ -3877,7 +3912,7 @@ sub checkSelfCondition {
 	}
 
 	# check skill use SP if this is a 'use skill' condition
-	if ($prefix =~ /skill|attackComboSlot/i) {
+	if ($prefix =~ /skill|attackComboSlot/io) {
 		my $skill = Skill->new(auto => $config{$prefix});
 		return 0 unless ($char->getSkillLevel($skill)
 						|| $config{$prefix."_equip_leftAccessory"}
@@ -3930,6 +3965,8 @@ sub checkSelfCondition {
 	if ($config{$prefix . "_inLockOnly"} > 0) { return 0 unless ($field->baseName eq $config{lockMap}); }
 	if ($config{$prefix . "_notWhileSitting"} > 0) { return 0 if ($char->{sitting}); }
 	if ($config{$prefix . "_notInTown"} > 0) { return 0 if ($field->isCity); }
+	if ($config{$prefix . "_inTown"} > 0) { return 0 if !$field->isCity; }
+
     if (defined $config{$prefix . "_monstersCount"}) {
 		my $nowMonsters = $monstersList->size();
 			if ($nowMonsters > 0 && $config{$prefix . "_notMonsters"}) {
@@ -3944,6 +3981,16 @@ sub checkSelfCondition {
 		my $exists;
 		foreach (ai_getAggressives()) {
 			if (existsInList($config{$prefix . "_monsters"}, $monsters{$_}->name)) {
+				$exists = 1;
+				last;
+			}
+		}
+		return 0 unless $exists;
+	}
+	if ($config{$prefix . "_partyMonsters"}) {
+		my $exists;
+		foreach (ai_getAggressives(undef, 1)) {
+			if (existsInList($config{$prefix . "_partyMonsters"}, $monsters{$_}->name)) {
 				$exists = 1;
 				last;
 			}
@@ -4027,9 +4074,26 @@ sub checkSelfCondition {
 		return 0 if (existsInList($config{$prefix . "_notInMap"}, $field->baseName));
 	}
 
+	if ($config{$prefix."_location"}) {
+		foreach (split /\s*,\s*/, $config{$prefix."_location"}) {
+		    my ($map, $x1, $y1, $x2, $y2) = split /\s+/, $_;
+		    return 0 if $map ne $field->baseName;
+		    ($x1,$x2) = ($x2,$x1) if $x1 > $x2;
+		    return 0 if $char->{pos_to}->{x} < $x1 || $char->{pos_to}->{x} > $x2;
+		    ($y1,$y2) = ($y2,$y1) if $y1 > $y2;
+		    return 0 if $char->{pos_to}->{y} < $y1 || $char->{pos_to}->{y} > $y2;
+		}
+	}
+
 	if ($config{$prefix."_whenEquipped"}) {
-		my $item = Actor::Item::get($config{$prefix."_whenEquipped"});
-		return 0 unless $item && $item->{equipped};
+		my $match = 0;
+		foreach (split /\s*,\s*/, $config{$prefix."_whenEquipped"}) {
+			my $item = Actor::Item::get($_);
+			next if !$item || !$item->{equipped};
+			$match = 1;
+			last;
+		}
+		return 0 if !$match;
 	}
 
 	if ($config{$prefix."_whenNotEquipped"}) {
@@ -4049,6 +4113,14 @@ sub checkSelfCondition {
 	
 	if (defined $config{$prefix.'_devotees'}) {
 		return 0 unless inRange(scalar keys %{$devotionList->{$accountID}{targetIDs}}, $config{$prefix.'_devotees'});
+	}
+
+	if ( $config{"${prefix}_blvl"} ) {
+		return 0 unless inRange( $char->{lv}, $config{ "${prefix}_blvl" } );
+	}
+
+	if ( $config{ "${prefix}_jlvl" } ) {
+		return 0 unless inRange( $char->{lv_job}, $config{ "${prefix}_jlvl" } );
 	}
 
 	my %hookArgs;
@@ -4434,10 +4506,10 @@ sub parseReload {
 	};
 	if (my $e = caught('UTF8MalformedException')) {
 		error TF(
-			"The file %s must be valid UTF-8 encoded, which it is \n" .
+			"The file %s [line %d] must be valid UTF-8 encoded, which it is \n" .
 			"currently not. To solve this prolem, please use Notepad\n" .
 			"to save that file as valid UTF-8.",
-			$e->textfile);
+			$e->textfile, $e->textfileline);
 	} elsif ($@) {
 		die $@;
 	}

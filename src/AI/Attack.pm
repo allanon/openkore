@@ -34,6 +34,7 @@ use Utils;
 use Utils::Benchmark;
 use Utils::PathFinding;
 
+my $dirs = [ { x => 0, y => 1 }, { x => -1, y => 1 }, { x => -1, y => 0 }, { x => -1, y => -1 }, { x => 0, y => -1 }, { x => 1, y => -1 }, { x => 1, y => 0 }, { x => 1, y => 1 }, { x => 0, y => 1 } ];
 
 sub process {
 	Benchmark::begin("ai_attack") if DEBUG;
@@ -89,6 +90,11 @@ sub process {
 		my $ID = $args->{ID};
 		if (targetGone()) {
 			finishAttacking();
+			my @is;
+			while (@is = grep { AI::action($_) eq 'attack' && targetGone($_) } 0..$#AI::ai_seq) {
+Log::message("finishAttacking($is[0]) :: ".unpack('V', AI::args($is[0])->{ID})."\n");
+				finishAttacking($is[0]);
+			}
 		} elsif (shouldGiveUp()) {
 			giveUp();
 		} else {
@@ -110,6 +116,14 @@ sub process {
 		if ($monster && !Misc::checkMonsterCleanness($ID)) {
 			dropTargetWhileMoving();
 		}
+
+        if ($monster && $monster->{statuses}->{EFFECTSTATE_BURROW} && !$config{attackAuto_hidden}) {
+        	message T("Dropping target - hidden\n");
+            $char->sendAttackStop;
+			AI::dequeue if AI::action eq 'move';
+			AI::dequeue if AI::action eq 'route';
+			AI::dequeue if AI::action eq 'attack';
+        }
 
 		# Mob-training, stop attacking the monster if it is already aggressive
 		if ((my $control = mon_control($monster->{name},$monster->{nameID}))) {
@@ -137,6 +151,7 @@ sub process {
 
 sub shouldGiveUp {
 	my $args = AI::args;
+	return 1 if $monsters{$args->{ID}} && $monsters{$args->{ID}}->{statuses}->{EFFECTSTATE_BURROW} && !$config{attackAuto_hidden};
 	return !$config{attackNoGiveup} && (timeOut($args->{ai_attack_giveup}) || $args->{unstuck}{count} > 5);
 }
 
@@ -146,6 +161,10 @@ sub giveUp {
 	$target->{attack_failed} = time if ($monsters{$ID});
 	AI::dequeue;
 	message T("Can't reach or damage target, dropping target\n"), "ai_attack";
+    $char->sendAttackStop;
+	AI::dequeue if AI::action eq 'move';
+	AI::dequeue if AI::action eq 'route';
+	AI::dequeue if AI::action eq 'attack';
 	if ($config{'teleportAuto_dropTarget'}) {
 		message T("Teleport due to dropping attack target\n");
 		useTeleport(1);
@@ -153,18 +172,20 @@ sub giveUp {
 }
 
 sub targetGone {
-	my $args = AI::args;
+	my ( $i ) = @_;
+	my $args = AI::args($i);
 	return !$monsters{$args->{ID}} && (!$players{$args->{ID}} || $players{$args->{ID}}{dead});
 }
 
 sub finishAttacking {
-	my $args = AI::args;
+	my ( $i ) = @_;
+	my $args = AI::args($i);
 	$timeout{'ai_attack'}{'time'} -= $timeout{'ai_attack'}{'timeout'};
 	my $ID = $args->{ID};
-	AI::dequeue;
+	AI::remove($i);
 	if ($monsters_old{$ID} && $monsters_old{$ID}{dead}) {
 		message T("Target died\n"), "ai_attack";
-		Plugins::callHook("target_died", {monster => $monsters_old{$ID}});
+		Plugins::callHook("target_died", { monster => $monsters_old{$ID} });
 		monKilled();
 
 		# Pickup loot when monster's dead
@@ -283,6 +304,7 @@ sub main {
 	Benchmark::begin("ai_attack (part 1.2)") if DEBUG;
 
 	# Determine what combo skill to use
+	$args->{lastAttackMethod} = $args->{attackMethod};
 	delete $args->{attackMethod};
 	my $i = 0;
 	while (exists $config{"attackComboSlot_$i"}) {
@@ -291,8 +313,7 @@ sub main {
 			next;
 		}
 
-		if ($config{"attackComboSlot_${i}_afterSkill"}
-		 && Skill->new(auto => $config{"attackComboSlot_${i}_afterSkill"})->getIDN == $char->{last_skill_used}
+		if (Skill->new(auto => $config{"attackComboSlot_${i}_afterSkill"})->getIDN == $char->{last_skill_used}
 		 && ( !$config{"attackComboSlot_${i}_maxUses"} || $args->{attackComboSlot_uses}{$i} < $config{"attackComboSlot_${i}_maxUses"} )
 		 && ( !$config{"attackComboSlot_${i}_autoCombo"} || ($char->{combo_packet} && $config{"attackComboSlot_${i}_autoCombo"}) )
 		 && ( !defined($args->{ID}) || $args->{ID} eq $char->{last_skill_target} || !$config{"attackComboSlot_${i}_isSelfSkill"})
@@ -333,7 +354,7 @@ sub main {
 		}
 
 		$i = 0;
-		while (exists $config{"attackSkillSlot_$i"}) {
+		while (exists $config{"attackSkillSlot_$i"} && !$char->{statuses}->{EFST_POSTDELAY}) {
 			if (!$config{"attackSkillSlot_$i"}) {
 				$i++;
 				next;
@@ -342,8 +363,7 @@ sub main {
 			my $skill = new Skill(auto => $config{"attackSkillSlot_$i"});
 			if ($skill->getOwnerType == Skill::OWNER_CHAR
 				&& checkSelfCondition("attackSkillSlot_$i")
-				&& (!$config{"attackSkillSlot_$i"."_maxUses"} ||
-				    $target->{skillUses}{$skill->getHandle()} < $config{"attackSkillSlot_$i"."_maxUses"})
+				&& (!$config{"attackSkillSlot_$i"."_maxUses"} || $target->{skillUses}{$skill->getHandle()} < $config{"attackSkillSlot_$i"."_maxUses"})
 				&& (!$config{"attackSkillSlot_$i"."_maxAttempts"} || $args->{attackSkillSlot_attempts}{$i} < $config{"attackSkillSlot_$i"."_maxAttempts"})
 				&& (!$config{"attackSkillSlot_$i"."_monsters"} || existsInList($config{"attackSkillSlot_$i"."_monsters"}, $target->{'name'}))
 				&& (!$config{"attackSkillSlot_$i"."_notMonsters"} || !existsInList($config{"attackSkillSlot_$i"."_notMonsters"}, $target->{'name'}))
@@ -370,6 +390,8 @@ sub main {
 	if ($args->{attackMethod}{maxDistance} < $args->{attackMethod}{distance}) {
 		$args->{attackMethod}{maxDistance} = $args->{attackMethod}{distance};
 	}
+
+	$args->{thisAttackMethod} = $args->{attackMethod};
 
 	Benchmark::end("ai_attack (part 1.2)") if DEBUG;
 	Benchmark::end("ai_attack (part 1)") if DEBUG;
@@ -512,6 +534,10 @@ sub main {
 		$args->{avoiding} = 1;
 		$char->move(@{$bestBlock}{qw(x y)}, $ID);
 
+	} elsif ($realMonsterDist > $args->{attackMethod}{maxDistance} && $config{attackTurretMode}) {
+		$target->{attack_failed} = time;
+		AI::dequeue;
+		message T("In turret mode and target is out of range, dropping target\n"), "ai_attack";
 	} elsif ($realMonsterDist > $args->{attackMethod}{maxDistance}
 	  && !timeOut($args->{ai_attack_giveup})) {
 		# The target monster moved; move to target
@@ -578,6 +604,26 @@ sub main {
 			$ai_v{"attackSkillSlot_${slot}_target_time"}{$ID} = time;
 
 			ai_setSuspend(0);
+            if ( $config{"attackSkillSlot_${slot}_fromBehind"} ) {
+                my $dir  = $dirs->[ $target->{look}->{body} ];
+                my $x    = $target->{pos_to}->{x} - $dir->{x};
+                my $y    = $target->{pos_to}->{y} - $dir->{y};
+                if ( $field->isWalkable( $x, $y ) ) {
+                    message "Trying to move behind target ($x,$y).\n";
+                    $messageSender->sendMove( $x, $y );
+                }
+            }
+            if ( $config{"attackSkillSlot_${slot}_shape"} =~ 'front (\d+)x(\d+)' ) {
+
+                # If we take a step backwards, will that target any more enemies?
+                my $dir = $dirs->[ $target->{look}->{body} ];
+                my $x   = $realMyPos->{x} - $dir->{x};
+                my $y   = $realMyPos->{y} - $dir->{y};
+                if ( $field->isWalkable( $x, $y ) ) {
+                    message "Trying to move behind target ($x,$y).\n";
+                    $messageSender->sendMove( $x, $y );
+                }
+            }
 			my $skill = new Skill(auto => $config{"attackSkillSlot_$slot"});
 			ai_skillUse2(
 				$skill,

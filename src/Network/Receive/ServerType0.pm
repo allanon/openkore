@@ -413,7 +413,6 @@ sub new {
 		'02B7' => ['quest_active', 'V C', [qw(questID active)]],
 		'02B8' => ['party_show_picker', 'a4 v C3 a8 v C', [qw(sourceID nameID identified broken upgrade cards location type)]],
 		'02B9' => ['hotkeys'],
-		'02C1' => ['npc_chat', 'v V2 a24', [qw(len accountID color msg)]],
 		'02C5' => ['party_invite_result', 'Z24 V', [qw(name type)]],
 		'02C6' => ['party_invite', 'a4 Z24', [qw(ID name)]],
 		'02C9' => ['party_allow_invite', 'C', [qw(type)]],
@@ -551,12 +550,8 @@ sub new {
 		'099D' => ['received_characters', 'v a*', [qw(len charInfo)]],
 		'099F' => ['area_spell_multiple2', 'v a*', [qw(len spellInfo)]], # -1
 		'09A0' => ['sync_received_characters', 'V', [qw(sync_Count)]],
-		'09CA' => ['area_spell_multiple3', 'v a*', [qw(len spellInfo)]], # -1
-		'09CD' => ['message_string', 'v V', [qw(msg_id para1)]], #8
 		'09CF' => ['gameguard_request'],
 		'0A27' => ['hp_sp_changed', 'v2', [qw(type amount)]],
-		'0A34' => ['senbei_amount', 'V', [qw(amount)]], #new senbei system (new cash currency)
-		'C350' => ['senbei_vender_items_list'], #new senbei vender, need research
 	};
 
 	# Item RECORD Struct's
@@ -1042,8 +1037,8 @@ sub parse_items_nonstackable {
 		# packet, so we must assume one.  We'll even play it safe, and
 		# not change the amount if it's already a non-zero value.
 		$item->{amount} = 1 unless ($item->{amount});
-		$item->{broken} = $item->{identified} & (1 << 1) unless exists $item->{broken};
-		$item->{idenfitied} = $item->{identified} & (1 << 0);
+		$item->{broken} = $item->{identified} & 2 unless exists $item->{broken};
+		$item->{identified} = $item->{identified} & 1;
 	})
 }
 
@@ -1207,6 +1202,7 @@ sub area_spell {
 	}
 
 	Plugins::callHook('packet_areaSpell', {
+		ID => $ID,
 		fail => $fail,
 		sourceID => $sourceID,
 		type => $type,
@@ -1920,7 +1916,6 @@ sub deal_begin {
 			} else {
 				$currentDeal{name} = T('Unknown #') . unpack("V", $ID);
 			}
-			undef %outgoingDeal;
 		}
 		message TF("Engaged Deal with %s\n", $currentDeal{name}), "deal";
 	} elsif ($args->{type} == 5) {
@@ -2069,7 +2064,7 @@ sub emoticon {
 sub equip_item {
 	my ($self, $args) = @_;
 	my $item = $char->inventory->getByServerIndex($args->{index});
-	if ((!$args->{success} && $args->{switch} eq "00AA") || ($args->{success} && $args->{switch} eq "0999")) {
+	if ((!$args->{success} & $args->{switch} eq "00AA") || ($args->{success} & $args->{switch} eq "0999")) {
 		message TF("You can't put on %s (%d)\n", $item->{name}, $item->{invIndex});
 	} else {
 		$item->{equipped} = $args->{type};
@@ -2168,6 +2163,21 @@ sub errors {
 	} else {
 		error TF("Unknown error %s\n", $args->{type}), "connection";
 	}
+}
+
+sub forge_list {
+	my ($self, $args) = @_;
+
+	message T("========Forge List========\n");
+	for (my $i = 4; $i < $args->{RAW_MSG_SIZE}; $i += 8) {
+		my $viewID = unpack("v1", substr($args->{RAW_MSG}, $i, 2));
+		message "$viewID $items_lut{$viewID}\n";
+		# always 0x0012
+		#my $unknown = unpack("v1", substr($args->{RAW_MSG}, $i+2, 2));
+		# ???
+		#my $charID = substr($args->{RAW_MSG}, $i+4, 4);
+	}
+	message "=========================\n";
 }
 
 sub friend_list {
@@ -2340,12 +2350,11 @@ sub homunculus_state_handler {
 	}
 
 	if (($args->{state} & ~8) > 1) {
-		#Disabled these code as homun skills are not resent to client, so we shouldnt do deleting skill sets in this place.
-		#foreach my $handle (@{$char->{homunculus}{slave_skillsID}}) {
-		#	delete $char->{skills}{$handle};
-		#}
-		$char->{homunculus}->clear(); #TODO: Check for memory leak?
-		#undef @{$char->{homunculus}{slave_skillsID}};
+		foreach my $handle (@{$char->{homunculus}{slave_skillsID}}) {
+			delete $char->{skills}{$handle};
+		}
+		$char->{homunculus}->clear();
+		undef @{$char->{homunculus}{slave_skillsID}};
 		if (defined $slave->{state} && $slave->{state} != $args->{state}) {
 			if ($args->{state} & 2) {
 				message T("Your Homunculus was vaporized!\n"), 'homunculus';
@@ -2372,10 +2381,7 @@ sub slave_calcproperty_handler {
 	$slave->{sp_max}       = ($args->{sp_max} > 0) ? $args->{sp_max} : $args->{sp};
 =cut
 
-	$slave->{attack_speed}     = int (200 - (($args->{aspd} < 10) ? 10 : ($args->{aspd} / 10)));
-	$slave->{hpPercent}    = $slave->{hp_max} ? ($slave->{hp} / $slave->{hp_max}) * 100 : undef;
-	$slave->{spPercent}    = $slave->{sp_max} ? ($slave->{sp} / $slave->{sp_max}) * 100 : undef;
-	$slave->{expPercent}   = ($args->{exp_max}) ? ($args->{exp} / $args->{exp_max}) * 100 : undef;
+	$slave->{attack_speed}     = int (200 - (($args->{attack_delay} < 10) ? 10 : ($args->{attack_delay} / 10)));
 }
 
 sub gameguard_grant {
@@ -2588,13 +2594,15 @@ sub guild_invite_result {
 }
 
 sub guild_location {
-	# FIXME: not implemented
 	my ($self, $args) = @_;
-	unless ($args->{x} > 0 && $args->{y} > 0) {
-		# delete locator for ID
-	} else {
-		# add/replace locator for ID
-	}
+	return if !$guild{member};
+	my ( $member ) = grep { $_->{ID} eq $args->{ID} } @{$guild{member}};
+	return if !$member;
+	if (!$args->{x} || !$args->{y}) {
+		delete $member->{pos};
+ 	} else {
+		$member->{pos} = { x => $args->{x}, y => $args->{y} };
+ 	}
 }
 
 sub guild_leave {
@@ -2721,6 +2729,7 @@ sub guild_notice {
 			"%s\n" .
 			"------------------\n", $address, $message);
 		message $msg, "guildnotice";
+		$guild{notice} = $message;
 	}
 
 	#message	T("Requesting guild information...\n"), "info"; # Lets Disable this, its kinda useless.
@@ -2871,7 +2880,13 @@ sub inventory_item_added {
 		}
 
 	} elsif ($fail == 6) {
-		message T("Can't loot item...wait...\n"), "drop";
+		if ($config{itemsTakeAuto_nonParty}) {
+			message T("Can't loot item...wait...\n"), "drop";
+		} else {
+			message T("Can't loot item... giving up...\n"), "drop";
+			# Clear item take actions from the AI queue.
+			AI::clear(qw(take items_gather items_take));
+		}
 	} elsif ($fail == 2) {
 		message T("Cannot pickup item (inventory full)\n"), "drop";
 	} elsif ($fail == 1) {
@@ -2879,6 +2894,8 @@ sub inventory_item_added {
 	} else {
 		message TF("Cannot pickup item (failure code %d)\n", $fail), "drop";
 	}
+	undef %incomingDeal;
+	undef %outgoingDeal;
 }
 
 sub item_used {
@@ -3333,13 +3350,14 @@ sub map_change {
 		$ai_v{portalTrace_mapChanged} = time;
 	}
 
+    my $old_pos = $char->{pos_to} || $char->{pos} || { x => 0, y => 0 };
 	my %coords = (
 		x => $args->{x},
 		y => $args->{y}
 	);
 	$char->{pos} = {%coords};
 	$char->{pos_to} = {%coords};
-	message TF("Map Change: %s (%s, %s)\n", $args->{map}, $char->{pos}{x}, $char->{pos}{y}), "connection";
+	message TF("Map Change: %s (%s, %s) from %s (%s, %s)\n", $args->{map}, $char->{pos}{x}, $char->{pos}{y}, $oldMap, $old_pos->{x}, $old_pos->{y}), "connection";
 	if ($net->version == 1) {
 		ai_clientSuspend(0, 10);
 	} else {
@@ -3410,6 +3428,7 @@ sub map_changed {
 	# Reset item and skill times. The effect of items (like aspd potions)
 	# and skills (like Twohand Quicken) disappears when we change map server.
 	# NOTE: with the newer servers, this isn't true anymore
+if (0) {
 	my $i = 0;
 	while (exists $config{"useSelf_item_$i"}) {
 		if (!$config{"useSelf_item_$i"}) {
@@ -3446,6 +3465,7 @@ sub map_changed {
 		delete $char->{permitSkill};
 		delete $char->{encoreSkill};
 	}
+}
 	$cart{exists} = 0;
 	undef %guild;
 
@@ -3661,10 +3681,9 @@ sub npc_talk {
 =cut
 
 	# Remove RO color codes
-	$talk{msg} =~ s/\^[a-fA-F0-9]{6}//g;
 	$msg =~ s/\^[a-fA-F0-9]{6}//g;
- 
-	# Prepend existing conversation.
+
+    # Prepend existing conversation.
 	$talk{msg} .= "\n" if $talk{msg};
 	$talk{msg} .= $msg;
 
@@ -3703,6 +3722,7 @@ sub npc_talk_close {
 
 	$ai_v{npc_talk}{talk} = 'close';
 	$ai_v{npc_talk}{time} = time;
+	$ai_v{npc_talk}{msg} = $talk{msg};
 	undef %talk;
 
 	Plugins::callHook('npc_talk_done', {ID => $ID});
@@ -3834,6 +3854,8 @@ sub party_chat {
 sub party_exp {
 	my ($self, $args) = @_;
 	$char->{party}{share} = $args->{type};
+	$char->{party}{shareItem} = $args->{itemPickup};
+	$char->{party}{shareItemDiv} = $args->{itemDivision};
 	if ($args->{type} == 0) {
 		message T("Party EXP set to Individual Take\n"), "party", 1;
 	} elsif ($args->{type} == 1) {
@@ -4351,6 +4373,12 @@ sub sync_received_characters {
 	}
 }
 
+sub received_characters_decoy {
+	my ($self, $args) = @_;
+	undef @chars;
+	$messageSender->sendToServer(pack('v', 0x09a1) x 10);
+}
+
 sub received_characters {
 	return if ($net->getState() == Network::IN_GAME);
 	my ($self, $args) = @_;
@@ -4762,8 +4790,8 @@ sub sense_result {
 			$args->{spirit}, $args->{undead}), "list";
 }
 
-# Your shop has sold an item -- one packet sent per item sold.
-#
+# Your shop has sold an item
+# Need a hook.
 sub shop_sold {
 	my ($self, $args) = @_;
 
@@ -4778,21 +4806,6 @@ sub shop_sold {
 	my $msg = TF("sold: %s - %s %sz\n", $amount, $articles[$number]{name}, $earned);
 	shopLog($msg);
 	message($msg, "sold");
-
-	# Call hook before we possibly remove $articles[$number] or
-	# $articles itself as a result of the sale.
-	Plugins::callHook(
-		'vending_item_sold',
-		{
-			#These first two entries are equivalent to $args' contents.
-			'vendShopIndex' => $number,
-			'amount' => $amount,
-			'vendArticle' => $articles[$number], #This is a hash
-		}
-	);
-
-	# Adjust the shop's articles for sale, and notify if the sold
-	# item and/or the whole shop has been sold out.
 	if ($articles[$number]{quantity} < 1) {
 		message TF("sold out: %s\n", $articles[$number]{name}), "sold";
 		#$articles[$number] = "";
@@ -4801,8 +4814,7 @@ sub shop_sold {
 			closeShop();
 		}
 	}
-}##end shop_sold()
-
+}
 
 # TODO:
 # Add 'dispose' support
@@ -5017,17 +5029,12 @@ sub skill_use {
 	}
 	$target->{sitting} = 0 unless $args->{type} == 4 || $args->{type} == 9 || $args->{damage} == 0;
 
-	#EFST_MAGICPOWER OVERRIDE
-	if ($args->{sourceID} eq $accountID	&& $char->statusActive('EFST_MAGICPOWER') && $args->{skillID} != 366) {
-		$char->setStatus("EFST_MAGICPOWER", 0);
-	}
-	
 	Plugins::callHook('packet_skilluse', {
 			'skillID' => $args->{skillID},
 			'sourceID' => $args->{sourceID},
 			'targetID' => $args->{targetID},
 			'damage' => $args->{damage},
-			'amount' => 0,
+			'amount' => $args->{level},
 			'x' => 0,
 			'y' => 0,
 			'disp' => \$disp
@@ -5106,11 +5113,6 @@ sub skill_use_location {
 	my $domain = ($sourceID eq $accountID) ? "selfSkill" : "skill";
 	message $disp, $domain;
 
-	#EFST_MAGICPOWER OVERRIDE
-	if ($args->{sourceID} eq $accountID	&& $char->statusActive('EFST_MAGICPOWER') && $args->{skillID} != 366) {
-		$char->setStatus("EFST_MAGICPOWER", 0);
-	}
-	
 	Plugins::callHook('packet_skilluse', {
 		'skillID' => $skillID,
 		'sourceID' => $sourceID,
@@ -5190,12 +5192,6 @@ sub skill_used_no_damage {
 			}
 		}
 	}
-	
-	#EFST_MAGICPOWER OVERRIDE
-	if ($args->{sourceID} eq $accountID	&& $char->statusActive('EFST_MAGICPOWER') && $args->{skillID} != 366) {
-		$char->setStatus("EFST_MAGICPOWER", 0);
-	}
-	
 	Plugins::callHook('packet_skilluse', {
 		skillID => $args->{skillID},
 		sourceID => $args->{sourceID},
@@ -5485,10 +5481,6 @@ our %stat_info_handlers = (
 
 		return unless $actor->isa('Actor::You');
 
-		Plugins::callHook('base_level_changed', {
-			level	=> $actor->{lv}
-		});
-
 		if ($config{dcOnLevel} && $actor->{lv} >= $config{dcOnLevel}) {
 			message TF("Disconnecting on level %s!\n", $config{dcOnLevel});
 			chatLog("k", TF("Disconnecting on level %s!\n", $config{dcOnLevel}));
@@ -5517,12 +5509,6 @@ our %stat_info_handlers = (
 		), 'info', $actor->isa('Actor::You') ? 1 : 2 if $change;
 
 		return unless $actor->isa('Actor::You');
-
-		Plugins::callHook('zeny_change', {
-			zeny	=> $actor->{zeny},
-			change	=> $change,
-		});
-
 
 		if ($config{dcOnZeny} && $actor->{zeny} <= $config{dcOnZeny}) {
 			$messageSender->sendQuit();
@@ -5587,10 +5573,6 @@ our %stat_info_handlers = (
 		message sprintf($actor->verb("%s are now job level %d\n", "%s is now job level %d\n"), $actor, $actor->{lv_job}), "success", $actor->isa('Actor::You') ? 1 : 2;
 
 		return unless $actor->isa('Actor::You');
-		
-		Plugins::callHook('job_level_changed', {
-			level	=> $actor->{lv_job}
-		});
 
 		if ($config{dcOnJobLevel} && $actor->{lv_job} >= $config{dcOnJobLevel}) {
 			message TF("Disconnecting on job level %d!\n", $config{dcOnJobLevel});
@@ -5751,8 +5733,37 @@ sub character_equip {
 
 	my $msg = '';
 	$msg .= T("---------Equipment List--------\n");
-	$msg .= TF("Name: %s\n", $args->{name});
-	$msg .= "%-${w}s : %s\n", $equipTypes_lut{$_->{equipped}}, $_->{name} foreach sort { $a->{sort} <=> $b->{sort} } @items;
+	$msg .= "Name: $args->{name}\n";
+	$msg .= TF("%-${w}s : %s\n", $equipTypes_lut{$_->{equipped}}, $_->{name}) foreach sort { $a->{sort} <=> $b->{sort} } @items;
+	$msg .= "-------------------------------\n";
+	message($msg, "list");
+}
+
+sub character_equip {
+	my ($self, $args) = @_;
+
+	my @items;
+	$self->_items_list({
+		class => 'Actor::Item',
+		hook => 'packet_character_equip',
+		debug_str => 'Other Character Equipment',
+		items => [$self->parse_items_nonstackable($args)],
+		adder => sub { push @items, $_[0] },
+	});
+
+    # Sort items by the rough order they'd show up in the official client.
+    my @bits = qw( 8 9 0 10 11 12 4 2 1 5 6 3 7 );
+    foreach my $item ( @items ) {
+        $item->{sort} |= ( ( $item->{equipped} >> $bits[$_] ) & 1 ) << $_ foreach 0 .. $#bits;
+    }
+
+    my $w = 0;
+    $w = max( $w, length $_ ) foreach values %equipTypes_lut;
+
+	my $msg = '';
+	$msg .= T("---------Equipment List--------\n");
+	$msg .= "Name: $args->{name}\n";
+	$msg .= TF("%-${w}s : %s\n", $equipTypes_lut{$_->{equipped}}, $_->{name}) foreach sort { $a->{sort} <=> $b->{sort} } @items;
 	$msg .= "-------------------------------\n";
 	message($msg, "list");
 }
@@ -5769,6 +5780,8 @@ sub storage_items_nonstackable {
 	});
 
 	$storageTitle = $args->{title} ? $args->{title} : undef;
+
+	writeStorageLog(0);
 }
 
 sub storage_items_stackable {
@@ -5791,6 +5804,8 @@ sub storage_items_stackable {
 	});
 
 	$storageTitle = $args->{title} ? $args->{title} : undef;
+
+	writeStorageLog(0);
 }
 
 sub storage_opened {
@@ -6055,8 +6070,6 @@ sub users_online {
 	message TF("There are currently %s users online\n", $args->{users}), "info";
 }
 
-
-# You see a vender!  Add them to the visible venders list.
 sub vender_found {
 	my ($self, $args) = @_;
 	my $ID = $args->{ID};
@@ -6091,8 +6104,8 @@ sub vender_items_list {
 	my $player = Actor::get($venderID);
 
 	message TF("%s\n" .
-		"#   Name                                      Type           Amount       Price\n",
-		center(' Vender: ' . $player->nameIdx . ' ', 79, '-')), ($config{showDomain_Shop}?$config{showDomain_Shop}:"list");
+		"#   Name                                      Type        Amount          Price\n",
+		center(' Vender: ' . $player->nameIdx . ' ', 79, '-')), "list";
 	for (my $i = $headerlen; $i < $args->{RAW_MSG_SIZE}; $i+=22) {
 		my $item = {};
 		my $index;
@@ -6125,11 +6138,11 @@ sub vender_items_list {
 		});
 
 		message(swrite(
-			"@<< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<<<< @>>>>> @>>>>>>>>>z",
+			"@<< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<< @>>>>> @>>>>>>>>>>>>z",
 			[$index, $item->{name}, $itemTypes_lut{$item->{type}}, $item->{amount}, formatNumber($item->{price})]),
-			($config{showDomain_Shop}?$config{showDomain_Shop}:"list"));
+			"list");
 	}
-	message("-------------------------------------------------------------------------------\n", ($config{showDomain_Shop}?$config{showDomain_Shop}:"list"));
+	message("-------------------------------------------------------------------------------\n", "list");
 
 	Plugins::callHook('packet_vender_store2', {
 		venderID => $venderID,
@@ -6145,8 +6158,6 @@ sub vender_lost {
 	delete $venderLists{$ID};
 }
 
-
-# Buy from a vending shop -- failed for one of 2+ reasons
 sub vender_buy_fail {
 	my ($self, $args) = @_;
 
@@ -6175,7 +6186,7 @@ sub vending_start {
 	# FIXME: Read the packet the server sends us to determine
 	# the shop title instead of using $shop{title}.
 	my $display = center(" $shop{title} ", 79, '-') . "\n" .
-		T("#  Name                                   Type            Amount          Price\n");
+		T("#  Name                                        Type       Amount          Price\n");
 	for (my $i = 8; $i < $msg_size; $i += 22) {
 		my $number = unpack("v1", substr($msg, $i + 4, 2));
 		my $item = $articles[$number] = {};
@@ -6193,7 +6204,7 @@ sub vending_start {
 		debug ("Item added to Vender Store: $item->{name} - $item->{price} z\n", "vending", 2);
 
 		$display .= swrite(
-			"@< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<<<<<  @>>>>  @>>>>>>>>>>>z",
+			"@< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<< @>>>>>> @>>>>>>>>>>>>z",
 			[$articles, $item->{name}, $itemTypes_lut{$item->{type}}, $item->{quantity}, formatNumber($item->{price})]);
 	}
 	$display .= ('-'x79) . "\n";
@@ -6953,6 +6964,148 @@ sub boss_map_info {
 	}
 }
 
+our $mission_goals = {};
+
+# 02B1
+sub quest_all_list {
+	my ($self, $args) = @_;
+	$questList = {};
+	for (my $i = 8; $i < $args->{amount}*5+8; $i += 5) {
+		my ($questID, $active) = unpack('V C', substr($args->{RAW_MSG}, $i, 5));
+		$questList->{$questID}->{active} = $active;
+		debug "$questID $active\n", "info";
+	}
+}
+
+# 097A
+sub quest_all_list2 {
+	my ($self, $args) = @_;
+	for (my $i = 8; $i < length $args->{RAW_MSG};) {
+		my ($questID, $active, $time_start, $time, $mission_amount) = unpack('VCVVv', substr($args->{RAW_MSG}, $i, 15));
+		$i += 15;
+		my $quest = $questList->{$questID} ||= {};
+		$quest->{active} = $active;
+		$quest->{time_start} = $time_start;
+		$quest->{time} = $time;
+		debug "$questID $time_start $time $mission_amount\n", "info";
+		for (my $j = 0; $j < $mission_amount; $j++) {
+			my ($mobID, $count, $goal, $mobName) = unpack 'VvvZ24', substr $args->{RAW_MSG}, $i, 32;
+			$i += 32;
+			my $mission = $quest->{missions}->{$mobID} ||= {};
+			$mission->{mobID} = $mobID;
+			$mission->{count} = $count;
+			$mission->{goal} = $mission_goals->{$questID}->{$mobID} = $goal;
+			$mission->{mobName} = bytesToString($mobName);
+			debug "- $mobID $count/$goal $mobName\n", "info";
+		}
+	}
+}
+
+# 02B2
+# note: this packet shows all quests + their missions and has variable length
+sub quest_all_mission {
+	my ($self, $args) = @_;
+	debug $self->{packet_list}{$args->{switch}}->[0] . " " . join(', ', @{$args}{@{$self->{packet_list}{$args->{switch}}->[2]}}) ."\n";
+	for (my $i = 8; $i < $args->{amount}*104+8; $i += 104) {
+		my ($questID, $time_start, $time, $mission_amount) = unpack('V3 v', substr($args->{RAW_MSG}, $i, 14));
+		my $quest = \%{$questList->{$questID}};
+		$quest->{time_start} = $time_start;
+		$quest->{time} = $time;
+		debug "$questID $time_start $time $mission_amount\n", "info";
+		for (my $j = 0; $j < $mission_amount; $j++) {
+			my ($mobID, $count, $mobName) = unpack('V v Z24', substr($args->{RAW_MSG}, 14+$i+$j*30, 30));
+			my $mission = \%{$quest->{missions}->{$mobID}};
+			$mission->{mobID} = $mobID;
+			$mission->{count} = $count;
+			$mission->{goal} = $mission_goals->{$questID}->{$mobID};
+			$mission->{mobName} = bytesToString($mobName);
+			debug "- $mobID $count $mobName\n", "info";
+		}
+	}
+}
+
+# 02B3
+# note: this packet shows all missions for 1 quest and has fixed length
+sub quest_add {
+	my ($self, $args) = @_;
+	my $questID = $args->{questID};
+	my $quest = \%{$questList->{$questID}};
+
+	unless (%$quest) {
+		message TF("Quest: %s has been added.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID), "info";
+	}
+
+	$quest->{time_start} = $args->{time_start};
+	$quest->{time} = $args->{time};
+	$quest->{active} = $args->{active};
+	debug $self->{packet_list}{$args->{switch}}->[0] . " " . join(', ', @{$args}{@{$self->{packet_list}{$args->{switch}}->[2]}}) ."\n";
+	for (my $i = 0; $i < $args->{amount}; $i++) {
+		my ($mobID, $count, $mobName) = unpack('V v Z24', substr($args->{RAW_MSG}, 17+$i*30, 30));
+		my $mission = \%{$quest->{missions}->{$mobID}};
+		$mission->{mobID} = $mobID;
+		$mission->{count} = $count;
+		$mission->{goal} = $mission_goals->{$questID}->{$mobID};
+		$mission->{mobName} = bytesToString($mobName);
+		debug "- $mobID $count $mobName\n", "info";
+	}
+}
+
+# 02B4
+sub quest_delete {
+	my ($self, $args) = @_;
+	my $questID = $args->{questID};
+	message TF("Quest: %s has been deleted.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID), "info";
+	delete $questList->{$questID};
+}
+
+sub parse_quest_update_mission_hunt {
+	my ($self, $args) = @_;
+	@{$args->{mobs}} = map {
+		my %result; @result{qw(questID mobID count)} = unpack 'V2 v', $_; \%result
+	} unpack '(a10)*', $args->{mobInfo};
+}
+
+sub reconstruct_quest_update_mission_hunt {
+	my ($self, $args) = @_;
+	$args->{mobInfo} = pack '(a10)*', map { pack 'V2 v', @{$_}{qw(questID mobID count)} } @{$args->{mobs}};
+}
+
+sub parse_quest_update_mission_hunt_v2 {
+	my ($self, $args) = @_;
+	@{$args->{mobs}} = map {
+		my %result; @result{qw(questID mobID goal count)} = unpack 'V2 v2', $_; $mission_goals->{$result{questID}}->{$result{mobID}} = $result{goal};\%result
+	} unpack '(a12)*', $args->{mobInfo};
+}
+
+sub reconstruct_quest_update_mission_hunt_v2 {
+	my ($self, $args) = @_;
+	$args->{mobInfo} = pack '(a12)*', map { pack 'V2 v2', @{$_}{qw(questID mobID goal count)} } @{$args->{mobs}};
+}
+
+# 02B5
+# note: this packet updates the objectives counters
+sub quest_update_mission_hunt {
+	my ($self, $args) = @_;
+	for my $mob (@{$args->{mobs}}) {
+		$mission_goals->{$mob->{questID}}->{$mob->{mobID}} = $mob->{goal};
+		message TF("Quest [%s] - defeated [%s] progress (%d/%d) \n", $quests_lut{$mob->{questID}} ? $quests_lut{$mob->{questID}}{title} : '',  $questList->{$mob->{questID}}{missions}{$mob->{mobID}}->{mobName}, $mob->{count}, $mob->{goal}), "info";
+		@{$questList->{$mob->{questID}}{missions}{$mob->{mobID}}}{@$_} = @{$mob}{@$_} for [qw(mobID goal count)];
+	}
+}
+
+# 02B7
+sub quest_active {
+	my ($self, $args) = @_;
+	my $questID = $args->{questID};
+
+	message $args->{active}
+		? TF("Quest %s is now active.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID)
+		: TF("Quest %s is now inactive.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID)
+	, "info";
+
+	$questList->{$args->{questID}}->{active} = $args->{active};
+}
+
 # 018B
 sub quit_response {
 	my ($self, $args) = @_;
@@ -7133,6 +7286,23 @@ sub buyer_items
 	}
 }
 
+sub progress_bar {
+	my($self, $args) = @_;
+	message TF("Progress bar loading (time: %d).\n", $args->{time}), 'info';
+	$taskManager->add(
+		new Task::Chained(tasks => [new Task::Wait(seconds => $args->{time}),
+		new Task::Function(function => sub {
+			 $messageSender->sendProgress();
+			 message TF("Progress bar finished.\n"), 'info';
+			 $_[0]->setDone;
+		})]));
+}
+
+sub progress_bar_stop {
+	my($self, $args) = @_;
+	message TF("Progress bar finished.\n", 'info');
+}
+
 sub open_buying_store { #0x810
 	my($self, $args) = @_;
 	my $amount = $args->{amount};
@@ -7228,7 +7398,7 @@ sub buying_store_items_list {
 	my $index = 0;
 
 	my $msg = center(T(" Buyer: ") . $player->nameIdx . ' ', 79, '-') ."\n".
-		T("#   Name                                      Type           Amount       Price\n");
+		T("#   Name                                      Type        Amount          Price\n");
 
 	for (my $i = $headerlen; $i < $args->{RAW_MSG_SIZE}; $i+=9) {
 		my $item = {};
@@ -7253,7 +7423,7 @@ sub buying_store_items_list {
 		});
 
 		$msg .= swrite(
-			"@<< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<<<< @>>>>> @>>>>>>>>>z",
+			"@<< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<< @>>>>> @>>>>>>>>>>>>z",
 			[$index, $item->{name}, $itemTypes_lut{$item->{type}}, $item->{amount}, formatNumber($item->{price})]);
 
 		$index++;
@@ -7391,53 +7561,10 @@ sub skill_msg {
 	#	'07E6' => ['skill_msg', 'v V', [qw(id msgid)]], #TODO: PACKET_ZC_MSG_SKILL     **msgtable
 }
 
-sub quest_all_list2 {
-	my ($self, $args) = @_;
-	$questList = {};
-	my $msg;
-	my ($questID, $active, $time_start, $time, $mission_amount);
-	my $i = 0;
-	my ($mobID, $count, $amount, $mobName);
-	while ($i < $args->{RAW_MSG_SIZE} - 8) {
-		$msg = substr($args->{message}, $i, 15);
-		($questID, $active, $time_start, $time, $mission_amount) = unpack('V C V2 v', $msg);
-		$questList->{$questID}->{active} = $active;
-		debug "$questID $active\n", "info";
-
-		my $quest = \%{$questList->{$questID}};
-		$quest->{time_start} = $time_start;
-		$quest->{time} = $time;
-		$quest->{mission_amount} = $mission_amount;
-		debug "$questID $time_start $time $mission_amount\n", "info";
-		$i += 15;
-
-		if ($mission_amount > 0) {
-			for (my $j = 0 ; $j < $mission_amount ; $j++) {
-				$msg = substr($args->{message}, $i, 32);
-				($mobID, $count, $amount, $mobName) = unpack('V v2 Z24', $msg);
-				my $mission = \%{$quest->{missions}->{$mobID}};
-				$mission->{mobID} = $mobID;
-				$mission->{count} = $count;
-				$mission->{amount} = $amount;
-				$mission->{mobName_org} = $mobName;
-				$mission->{mobName} = bytesToString($mobName);
-				debug "- $mobID $count / $amount $mobName\n", "info";
-				$i += 32;
-			}
-		}
-	}
-}
-
 sub show_script {
 	my ($self, $args) = @_;
 	
 	debug "$args->{ID}\n", 'parseMsg';
-}
-
-sub senbei_amount {
-	my ($self, $args) = @_;
-	
-	$char->{senbei} = $args->{senbei};
 }
 
 1;

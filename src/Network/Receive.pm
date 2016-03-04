@@ -258,8 +258,6 @@ sub received_characters_blockSize {
 sub received_characters_unpackString {
 	for ($masterServer && $masterServer->{charBlockSize}) {
 		# unknown purpose (0 = disabled, otherwise displays "Add-Ons" sidebar) (from rA)
-		# change $hairstyle
-		return 'a4 V9 v V2 v4 V v9 Z24 C8 v Z16 V x4 x4 x4 x1' if $_ == 147;
 		return 'a4 V9 v V2 v14 Z24 C8 v Z16 V x4 x4 x4' if $_ == 144;
 		# change slot feature
 		return 'a4 V9 v V2 v14 Z24 C8 v Z16 V x4 x4' if $_ == 140;
@@ -379,7 +377,7 @@ sub account_server_info {
 			message TF("Forcing connect to char server %s: %s\n", $masterServer->{charServer_ip}, $masterServer->{charServer_port}), 'connection';
 
 		} else {
-			message TF("Selected server: %s\n", @servers[$config{server}]->{name}), 'connection';
+			message TF("Selected server: %s\n", $servers[$config{server}]->{name}), 'connection';
 		}
 	}
 
@@ -732,19 +730,15 @@ typedef enum <unnamed-tag> {
 	if ($mustAdd) {
 		if (UNIVERSAL::isa($actor, "Actor::Player")) {
 			$playersList->add($actor);
-			Plugins::callHook('add_player_list', $actor);
 
 		} elsif (UNIVERSAL::isa($actor, "Actor::Monster")) {
 			$monstersList->add($actor);
-			Plugins::callHook('add_monster_list', $actor);
 
 		} elsif (UNIVERSAL::isa($actor, "Actor::Pet")) {
 			$petsList->add($actor);
-			Plugins::callHook('add_pet_list', $actor);
 
 		} elsif (UNIVERSAL::isa($actor, "Actor::Portal")) {
 			$portalsList->add($actor);
-			Plugins::callHook('add_portal_list', $actor);
 
 		} elsif (UNIVERSAL::isa($actor, "Actor::NPC")) {
 			my $ID = $args->{ID};
@@ -753,11 +747,9 @@ typedef enum <unnamed-tag> {
 				$actor->setName($npcs_lut{$location});
 			}
 			$npcsList->add($actor);
-			Plugins::callHook('add_npc_list', $actor);
 
 		} elsif (UNIVERSAL::isa($actor, "Actor::Slave")) {
 			$slavesList->add($actor);
-			Plugins::callHook('add_slave_list', $actor);
 		}
 	}
 
@@ -780,13 +772,12 @@ typedef enum <unnamed-tag> {
 			Plugins::callHook('player_exist', {player => $actor});
 
 		} elsif ($actor->isa('Actor::NPC')) {
-			message TF("NPC Exists: %s (%d, %d) (ID %d) - (%d)\n", $actor->name, $actor->{pos_to}{x}, $actor->{pos_to}{y}, $actor->{nameID}, $actor->{binID}), ($config{showDomain_NPC}?$config{showDomain_NPC}:"parseMsg_presence"), 1;
+			message TF("NPC Exists: %s (%d, %d) (ID %d) - (%d)\n", $actor->name, $actor->{pos_to}{x}, $actor->{pos_to}{y}, $actor->{nameID}, $actor->{binID}), "parseMsg_presence", 1;
 			Plugins::callHook('npc_exist', {npc => $actor});
 
 		} elsif ($actor->isa('Actor::Portal')) {
 			message TF("Portal Exists: %s (%s, %s) - (%s)\n", $actor->name, $actor->{pos_to}{x}, $actor->{pos_to}{y}, $actor->{binID}), "portals", 1;
-			Plugins::callHook('portal_exist', {portal => $actor});
-			
+
 		} elsif ($actor->isa('Actor::Monster')) {
 			debug sprintf("Monster Exists: %s (%d)\n", $actor->name, $actor->{binID}), "parseMsg_presence", 1;
 
@@ -817,7 +808,7 @@ typedef enum <unnamed-tag> {
 
 			Plugins::callHook('player_connected', {player => $actor});
 		} else {
-			debug "Unknown Connected: $args->{type} - \n", "parseMsg";
+			debug "Unknown Connected: $args->{type} - ", "parseMsg";
 		}
 
 	} elsif ($args->{switch} eq "007B" ||
@@ -974,7 +965,6 @@ sub actor_died_or_disappeared {
 		$portal->{disappeared} = 1;
 		$portal->{gone_time} = time;
 		$portals_old{$ID} = $portal->deepCopy();
-		Plugins::callHook('portal_disappeared', {portal => $portal});
 		$portalsList->remove($portal);
 
 	} elsif (defined $npcsList->getByID($ID)) {
@@ -983,7 +973,6 @@ sub actor_died_or_disappeared {
 		$npc->{disappeared} = 1;
 		$npc->{gone_time} = time;
 		$npcs_old{$ID} = $npc->deepCopy();
-		Plugins::callHook('npc_disappeared', {npc => $npc});
 		$npcsList->remove($npc);
 
 	} elsif (defined $petsList->getByID($ID)) {
@@ -991,14 +980,12 @@ sub actor_died_or_disappeared {
 		debug "Pet Disappeared: " . $pet->name . " ($pet->{binID})\n", "parseMsg";
 		$pet->{disappeared} = 1;
 		$pet->{gone_time} = time;
-		Plugins::callHook('pet_disappeared', {pet => $pet});
 		$petsList->remove($pet);
 
 	} elsif (defined $slavesList->getByID($ID)) {
 		my $slave = $slavesList->getByID($ID);
 		if ($args->{type} == 1) {
 			message TF("Slave Died: %s (%d) %s\n", $slave->name, $slave->{binID}, $slave->{actorType});
-			$slave->{state} = 4;
 		} else {
 			if ($args->{type} == 0) {
 				debug "Slave Disappeared: " . $slave->name . " ($slave->{binID}) $slave->{actorType} ($slave->{pos_to}{x}, $slave->{pos_to}{y})\n", "parseMsg_presence";
@@ -1288,7 +1275,6 @@ sub homunculus_info {
 		$char->{homunculus}{map} = $field->baseName;
 		unless ($char->{slaves}{$char->{homunculus}{ID}}) {
 			AI::SlaveManager::addSlave ($char->{homunculus});
-			$char->{homunculus}{appear_time} = time;
 		}
 	} elsif ($args->{state} == HO_RELATIONSHIP_CHANGED) {
 		$char->{homunculus}{intimacy} = $args->{val} if $char->{homunculus};
@@ -1492,9 +1478,6 @@ sub system_chat {
 	my $color;
 	if ($message =~ s/^ssss//g) {  # forces color yellow, or WoE indicator?
 		$prefix = T('[WoE]');
-	} elsif ($message =~ /^micc.*\0\0([0-9a-fA-F]{6})(.*)/) { #appears in twRO   ## [micc][name][\x00\x00][unknown][\x00\x00][color][name][blablabla][message]
-		($color, $message) = $message =~ /^micc.*\0\0([0-9a-fA-F]{6})(.*)/;
-		$prefix = T('[S]');
 	} elsif ($message =~ /^micc.{12,24}([0-9a-fA-F]{6})(.*)/) {
 		($color, $message) = $message =~ /^micc.*([0-9a-fA-F]{6})(.*)/;
 		$prefix = T('[S]');
@@ -1511,8 +1494,8 @@ sub system_chat {
 	stripLanguageCode(\$message);
 	chatLog("s", "$message\n") if ($config{logSystemChat});
 	# Translation Comment: System/GM chat
-	message "$prefix $message\n", "schat";
-	ChatQueue::add('gm', undef, undef, $message) if ($config{callSignGM});
+	message TF("%s %s\n", $prefix, $message), "schat";
+	ChatQueue::add('gm', undef, undef, $message);
 
 	Plugins::callHook('packet_sysMsg', {
 		Msg => $message,
@@ -1929,49 +1912,6 @@ sub area_spell_multiple2 {
 	});
 }
 
-#09CA
-sub area_spell_multiple3 {
-	my ($self, $args) = @_;
-
-	# Area effect spells; including traps!
-	my $len = $args->{len} - 4;
-	my $spellInfo = $args->{spellInfo};
-	my $msg = "";
-	my $binID;
-	my ($ID, $sourceID, $x, $y, $type, $range, $fail);
-	for (my $i = 0; $i < $len; $i += 19) {
-		$msg = substr($spellInfo, $i, 19);
-		($ID, $sourceID, $x, $y, $type, $range, $fail) = unpack('a4 a4 v3 X3 C2', $msg);
-
-		if ($spells{$ID} && $spells{$ID}{'sourceID'} eq $sourceID) {
-			$binID = binFind(\@spellsID, $ID);
-			$binID = binAdd(\@spellsID, $ID) if ($binID eq "");
-		} else {
-			$binID = binAdd(\@spellsID, $ID);
-		}
-	
-		$spells{$ID}{'sourceID'} = $sourceID;
-		$spells{$ID}{'pos'}{'x'} = $x;
-		$spells{$ID}{'pos'}{'y'} = $y;
-		$spells{$ID}{'pos_to'}{'x'} = $x;
-		$spells{$ID}{'pos_to'}{'y'} = $y;
-		$spells{$ID}{'binID'} = $binID;
-		$spells{$ID}{'type'} = $type;
-		if ($type == 0x81) {
-			message TF("%s opened Warp Portal on (%d, %d)\n", getActorName($sourceID), $x, $y), "skill";
-		}
-		debug "Area effect ".getSpellName($type)." ($binID) from ".getActorName($sourceID)." appeared on ($x, $y)\n", "skill", 2;
-	}
-
-	Plugins::callHook('packet_areaSpell', {
-		fail => $fail,
-		sourceID => $sourceID,
-		type => $type,
-		x => $x,
-		y => $y
-	});
-}
-
 sub sync_request_ex {
 	my ($self, $args) = @_;
 	
@@ -2105,154 +2045,6 @@ sub player_equipment {
 		}
 		$player->{shoes} = $ID1;
 	}
-}
-
-sub progress_bar {
-	my($self, $args) = @_;
-	message TF("Progress bar loading (time: %d).\n", $args->{time}), 'info';
-	$char->{progress_bar} = 1;
-	$taskManager->add(
-		new Task::Chained(tasks => [new Task::Wait(seconds => $args->{time}),
-		new Task::Function(function => sub {
-			 $messageSender->sendProgress();
-			 message TF("Progress bar finished.\n"), 'info';
-			 $char->{progress_bar} = 0;
-			 $_[0]->setDone;
-		})]));
-}
-
-sub progress_bar_stop {
-	my($self, $args) = @_;
-	message TF("Progress bar finished.\n", 'info');
-}
-
-# 02B1
-sub quest_all_list {
-	my ($self, $args) = @_;
-	$questList = {};
-	for (my $i = 8; $i < $args->{amount}*5+8; $i += 5) {
-		my ($questID, $active) = unpack('V C', substr($args->{RAW_MSG}, $i, 5));
-		$questList->{$questID}->{active} = $active;
-		debug "$questID $active\n", "info";
-	}
-}
-
-# 02B2
-# note: this packet shows all quests + their missions and has variable length
-sub quest_all_mission {
-	my ($self, $args) = @_;
-	debug $self->{packet_list}{$args->{switch}}->[0] . " " . join(', ', @{$args}{@{$self->{packet_list}{$args->{switch}}->[2]}}) ."\n";
-	for (my $i = 8; $i < $args->{amount}*104+8; $i += 104) {
-		my ($questID, $time_start, $time, $mission_amount) = unpack('V3 v', substr($args->{RAW_MSG}, $i, 14));
-		my $quest = \%{$questList->{$questID}};
-		$quest->{time_start} = $time_start;
-		$quest->{time} = $time;
-		debug "$questID $time_start $time $mission_amount\n", "info";
-		for (my $j = 0; $j < $mission_amount; $j++) {
-			my ($mobID, $count, $mobName) = unpack('V v Z24', substr($args->{RAW_MSG}, 14+$i+$j*30, 30));
-			my $mission = \%{$quest->{missions}->{$mobID}};
-			$mission->{mobID} = $mobID;
-			$mission->{count} = $count;
-			$mission->{mobName} = bytesToString($mobName);
-			debug "- $mobID $count $mobName\n", "info";
-		}
-	}
-}
-
-# 02B3
-# note: this packet shows all missions for 1 quest and has fixed length
-sub quest_add {
-	my ($self, $args) = @_;
-	my $questID = $args->{questID};
-	my $quest = \%{$questList->{$questID}};
-
-	unless (%$quest) {
-		message TF("Quest: %s has been added.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID), "info";
-	}
-
-	$quest->{time_start} = $args->{time_start};
-	$quest->{time} = $args->{time};
-	$quest->{active} = $args->{active};
-	debug $self->{packet_list}{$args->{switch}}->[0] . " " . join(', ', @{$args}{@{$self->{packet_list}{$args->{switch}}->[2]}}) ."\n";
-	for (my $i = 0; $i < $args->{amount}; $i++) {
-		my ($mobID, $count, $mobName) = unpack('V v Z24', substr($args->{RAW_MSG}, 17+$i*30, 30));
-		my $mission = \%{$quest->{missions}->{$mobID}};
-		$mission->{mobID} = $mobID;
-		$mission->{count} = $count;
-		$mission->{mobName} = bytesToString($mobName);
-		debug "- $mobID $count $mobName\n", "info";
-	}
-}
-
-# 02B4
-sub quest_delete {
-	my ($self, $args) = @_;
-	my $questID = $args->{questID};
-	message TF("Quest: %s has been deleted.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID), "info";
-	delete $questList->{$questID};
-}
-
-sub parse_quest_update_mission_hunt {
-	my ($self, $args) = @_;
-	@{$args->{mobs}} = map {
-		my %result; @result{qw(questID mobID count)} = unpack 'V2 v', $_; \%result
-	} unpack '(a10)*', $args->{mobInfo};
-}
-
-sub reconstruct_quest_update_mission_hunt {
-	my ($self, $args) = @_;
-	$args->{mobInfo} = pack '(a10)*', map { pack 'V2 v', @{$_}{qw(questID mobID count)} } @{$args->{mobs}};
-}
-
-sub parse_quest_update_mission_hunt_v2 {
-	my ($self, $args) = @_;
-	@{$args->{mobs}} = map {
-		my %result; @result{qw(questID mobID goal count)} = unpack 'V2 v2', $_; \%result
-	} unpack '(a12)*', $args->{mobInfo};
-}
-
-sub reconstruct_quest_update_mission_hunt_v2 {
-	my ($self, $args) = @_;
-	$args->{mobInfo} = pack '(a12)*', map { pack 'V2 v2', @{$_}{qw(questID mobID goal count)} } @{$args->{mobs}};
-}
-
-# 02B5
-sub quest_update_mission_hunt {
-   my ($self, $args) = @_;
-   my ($questID, $mobID, $goal, $count) = unpack('V2 v2', substr($args->{RAW_MSG}, 6));
-   my $quest = \%{$questList->{$questID}};
-   my $mission = \%{$quest->{missions}->{$mobID}};
-   $mission->{goal} = $goal;
-   $mission->{count} = $count;
-   debug "- $questID $mobID $count $goal\n", "info";
-}
-
-# 02B7
-sub quest_active {
-	my ($self, $args) = @_;
-	my $questID = $args->{questID};
-
-	message $args->{active}
-		? TF("Quest %s is now active.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID)
-		: TF("Quest %s is now inactive.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID)
-	, "info";
-
-	$questList->{$args->{questID}}->{active} = $args->{active};
-}
-
-sub forge_list {
-	my ($self, $args) = @_;
-
-	message T("========Forge List========\n");
-	for (my $i = 4; $i < $args->{RAW_MSG_SIZE}; $i += 8) {
-		my $viewID = unpack("v1", substr($args->{RAW_MSG}, $i, 2));
-		message "$viewID $items_lut{$viewID}\n";
-		# always 0x0012
-		#my $unknown = unpack("v1", substr($args->{RAW_MSG}, $i+2, 2));
-		# ???
-		#my $charID = substr($args->{RAW_MSG}, $i+4, 4);
-	}
-	message "=========================\n";
 }
 
 1;

@@ -15,8 +15,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 5851 $
+#  $Id: Input.pm 5851 2007-07-23 20:36:02Z vcl_kore $
 #
 #########################################################################
 package Interface::Wx::Input;

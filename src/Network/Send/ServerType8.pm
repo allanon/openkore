@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8678 $
+#  $Id: ServerType8.pm 8678 2013-09-08 21:15:50Z ya4ept $
 ########################################################################
 # Korea (kRO), before February 2007
 # The majority of private servers on Dec 2007; packet_ver 22 of eAthena

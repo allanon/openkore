@@ -30,7 +30,6 @@ sub new {
 	foreach my $switch (keys %packets) {
 		$self->{packet_list}{$switch} = $packets{$switch};
 	}
-
 	return $self;
 }
 

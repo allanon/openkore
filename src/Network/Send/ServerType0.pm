@@ -77,7 +77,7 @@ sub new {
 		'017E' => ['guild_chat', 'x2 Z*', [qw(message)]],
 		'0187' => ['ban_check', 'a4', [qw(accountID)]],
 		'018A' => ['quit_request', 'v', [qw(type)]],
-		'0193' => ['actor_name_request', 'a4', [qw(ID)]],
+		#'0193' => ['actor_name_request', 'a4', [qw(ID)]],
 		'01B2' => ['shop_open'], # TODO
 		'012E' => ['shop_close'], # len 2
 		'01D5' => ['npc_talk_text', 'v a4 Z*', [qw(len ID text)]],
@@ -435,6 +435,33 @@ sub sendEnteringVender {
 	debug "Sent Entering Vender: ".getHex($ID)."\n", "sendPacket", 2;
 }
 
+sub sendOpenBuyerShop {
+    my ( $self, $title, $items ) = @_;
+    my $msg = '';
+    $msg .= pack 'vv', 0x0811, 0;
+    $msg .= pack 'V',   5;                               # Item limit? For merchants, the limit is 5.
+    $msg .= pack 'C',   1;
+    $msg .= pack 'a80', I18N::stringToBytes( $title );
+    foreach ( @$items ) {
+        $msg .= pack 'vvV', $_->{nameID}, $_->{amount}, $_->{price};
+    }
+    substr $msg, 2, 2, pack 'v', length $msg;
+    $self->sendToServer( $msg );
+}
+
+sub sendCloseBuyerShop {
+    my ( $self ) = @_;
+    my $msg = pack 'v', 0x0815;
+    $self->sendToServer( $msg );
+}
+
+sub sendEquip {
+	my ($self, $index, $type) = @_;
+	my $msg = pack 'vvV', 0x0998, $index, $type;
+	$self->sendToServer($msg);
+	debug "Sent Equip: $index Type: $type\n" , 2;
+}
+
 # 0x0208,11,friendslistreply,2:6:10
 # Reject:0/Accept:1
 
@@ -443,6 +470,16 @@ sub sendFriendRemove {
 	my $msg = pack("C*", 0x03, 0x02) . $accountID . $charID;
 	$self->sendToServer($msg);
 	debug "Sent Remove a friend\n", "sendPacket";
+}
+
+sub sendProduceMix {
+	my ($self, $ID,
+		# nameIDs for added items such as Star Crumb or Flame Heart
+		$item1, $item2, $item3) = @_;
+
+	my $msg = pack("v5", 0x018E, $ID, $item1, $item2, $item3);
+	$self->sendToServer($msg);
+	debug "Sent Forge, Produce Item: $ID\n" , 2;
 }
 
 =pod
@@ -581,13 +618,20 @@ sub sendGuildRankChange {
 	debug "Sent Set Guild title: $index $title\n", "sendPacket", 2;
 }
 =cut
+# 6101 7c00
+# 0100 - 0000 - 0100 - 0000 - 0100 - 0000 - 0a00 0000 - 4f66 6669 6365 7200 0000 0000 0000 0000 0000 0000 0000 0000 Officer
+# 0200 - 0000 - 0100 - 0000 - 0200 - 0000 - 0000 0000 - 4a6f 6220 3300 0000 0000 0000 0000 0000 0000 0000 0000 0000 Job 3
+# 0300 - 0000 - 0000 - 0000 - 0300 - 0000 - 0000 0000 - 4a6f 6220 3400 0000 0000 0000 0000 0000 0000 0000 0000 0000 Job 4
+# 6101 2c00
+# 0200 - 0000 - 0100 - 0000 - 0200 - 0000 - 0000 0000 - 496e 7669 7465 7200 0000 0000 0000 0000 0000 0000 0000 0000 Inviter
+# V v2 V2 a24
 # 0x0161,-1,guildchangepositioninfo,2
 sub sendGuildPositionInfo {
 	my ($self, $r_array) = @_;
-	my $msg = pack('v2', 0x0161, 4+44*@{$r_array});
-	for (my $i = 0; $i < @{$r_array}; $i++) {
-		$msg .= pack('v2 V4 a24', $r_array->[$i]{index}, $r_array->[$i]{permissions}, $r_array->[$i]{index}, $r_array->[$i]{tax}, stringToBytes($r_array->[$i]{title}));
-		debug "Sent GuildPositionInfo: $r_array->[$i]{index}, $r_array->[$i]{permissions}, $r_array->[$i]{index}, $r_array->[$i]{tax}, ".stringToBytes($r_array->[$i]{title})."\n", "d_sendPacket", 2;
+	my $msg = pack('v2', 0x0161, 4+40*@$r_array);
+	for (my $i = 0; $i < @$r_array; $i++) {
+		$msg .= pack('V v2 V2 a24', $r_array->[$i]{index}, $r_array->[$i]{invite}, $r_array->[$i]{punish}, $r_array->[$i]{index}, $r_array->[$i]{tax}, stringToBytes($r_array->[$i]{title}));
+		debug "Sent GuildPositionInfo: $r_array->[$i]{index}, $r_array->[$i]{invite}, $r_array->[$i]{punish}, $r_array->[$i]{index}, $r_array->[$i]{tax}, ".stringToBytes($r_array->[$i]{title})."\n", "d_sendPacket", 2;
 	}
 	$self->sendToServer($msg);
 }
@@ -1231,6 +1275,13 @@ sub sendCaptchaAnswer {
 	my ($self, $answer) = @_;
 	my $msg = pack('v2 a4 a24', 0x07E7, 0x20, $accountID, $answer);
 	$self->sendToServer($msg);
+}
+
+sub sendProgress {
+	my ($self) = @_;
+	my $msg = pack("C*", 0xf1, 0x02);
+	$self->sendToServer($msg);
+	debug "Sent Progress Bar Finish\n", "sendPacket", 2;
 }
 
 # 0x0204,18

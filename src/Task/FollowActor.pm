@@ -56,7 +56,7 @@ sub new {
 	my $self = $class->SUPER::new(@_, mutexes => ['movement']);
 
 	if (!$args{actor} || !$args{actorList}) {
-		ArgumentException->throw(error => "Invalid arguments.");
+		ArgumentException->throw(error => "Task::FollowActor: Invalid arguments.");
 	}
 
 	$self->{actorID} = $args{actor}{ID};

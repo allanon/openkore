@@ -132,7 +132,7 @@ sub iterate {
 			}
 
 			if ($target && $target->{statuses}->{EFFECTSTATE_BURROW}) {
-				$self->setError(NPC_NOT_FOUND, T("NPC is hidden."));
+				$self->setError(NPC_NOT_FOUND, TF("NPC is hidden."));
 				$target = undef;
 			}
 
@@ -150,15 +150,17 @@ sub iterate {
 			# NPCs drop the conversation automatically after a certain amount of time. Not sure how long. After that, this fails.
 			if (%talk && (!$target || $target->{ID} eq $talk{ID}) && !exists $talk{buyOrSell}) {
 				$self->{ID} = $talk{ID};
-				$self->{target} = Actor::NPC->new;
+				$target = $self->{target} = Actor::NPC->new;
 				$self->{target}->{appear_time} = time;
 				$self->{target}->{name} = 'Unknown';
 				$self->{steps} = [parseArgs($self->{sequence})];
 			}
 
-			if ($target || %talk) {
+			if ($target) {
 				$self->{stage} = 'Talking to NPC';
 				$self->{time} = time;
+			} else {
+				$self->setError(NPC_NOT_FOUND, TF('NPC not found.'));
 			}
 		}
 
@@ -167,6 +169,7 @@ sub iterate {
 		# we could get disconnected.
 		#$messageSender->sendTalkCancel($self->{ID}) if ($npcsList->getByID($self->{ID}));
 		$self->setDone();
+message "TalkNPC [$self->{nameID}] [$self->{x} $self->{y}] [$self->{target}] if $self->{mapChanged} || ($ai_v{npc_talk}{talk} eq 'close' && $self->{steps}[0] !~ /x/i)\n";
 		message TF("Done talking with %s.\n", $self->{target}->name), "ai_npcTalk";
 
 	} elsif (!$ai_v{npc_talk}{time} && timeOut($self->{time}, $timeResponse)) {

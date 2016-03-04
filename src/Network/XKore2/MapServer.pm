@@ -158,7 +158,7 @@ sub map_loaded {
 	# The RO client has finished loading the map.
 	# Send character information to the RO client.
 	my ($self, $args, $client) = @_;
-	no encoding 'utf8';
+	no utf8;
 	use bytes;
 
 	my $char;

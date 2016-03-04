@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8814 $
+#  $Id: Actor.pm 8814 2014-01-13 21:05:57Z marcelofoxes $
 #
 #########################################################################
 ##
@@ -475,6 +475,33 @@ sub snipable {
 }
 
 ##
+# float $Actor->hpPercent()
+#
+# Returns the hp as a percentage of max_hp.
+sub hpPercent {
+	my ($self) = @_;
+	return $self->{hp_max} ? 100 * $self->{hp} / $self->{hp_max} : undef;
+}
+
+##
+# float $Actor->spPercent()
+#
+# Returns the sp as a percentage of max_sp.
+sub spPercent {
+	my ($self) = @_;
+	return $self->{sp_max} ? 100 * $self->{sp} / $self->{sp_max} : undef;
+}
+
+##
+# float $Actor->expPercent()
+#
+# Returns the exp as a percentage of max_exp.
+sub expPercent {
+	my ($self) = @_;
+	return $self->{exp_max} ? 100 * $self->{exp} / $self->{exp_max} : undef;
+}
+
+##
 # Actor $Actor->deepCopy()
 # Ensures: defined(result)
 #
@@ -591,7 +618,7 @@ sub setStatus {
 	}
 	message
 		Misc::status_string($self, defined $statusName{$handle} ? $statusName{$handle} : $handle, $again, $flag ? $tick/1000 : 0),
-		"parseMsg_statuslook", ($self->{ID} eq $accountID or $char->{slaves} && $char->{slaves}{$self->{ID}}) ? 1 : 2;
+		"parseMsg_statuslook", ($self->{ID} eq $accountID or $char->{slaves} && $char->{slaves}{$self->{ID}} or $self->{dmgToYou} or $self->{missedYou} or $self->{dmgFromYou} or $self->{dmgFromParty}) ? 1 : 2;
 		
 	Plugins::callHook('Actor::setStatus::change', {
 		handle => $handle,
@@ -850,6 +877,8 @@ sub processTask {
 sub sendAttackStop {
 	my ($self) = @_;
 	
+my @xy = @{calcPosition($self)}{qw(x y)};
+message "sendAttackStop(@xy)\n";
 	$self->sendMove(@{calcPosition($self)}{qw(x y)});
 }
 

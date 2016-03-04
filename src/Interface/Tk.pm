@@ -14,8 +14,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7534 $
+#  $Id: Tk.pm 7534 2010-10-22 01:19:43Z kLabMouse $
 #
 #########################################################################
 

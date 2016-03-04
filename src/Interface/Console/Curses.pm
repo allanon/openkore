@@ -16,8 +16,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8936 $
+#  $Id: Curses.pm 8936 2014-12-22 00:54:20Z allanon $
 #
 #########################################################################
 package Interface::Console::Curses;
@@ -33,6 +33,19 @@ use Modules;
 use Settings qw/%sys/;
 
 use constant MAXHISTORY => 50;
+
+# UTF-8 doesn't work, even when linked against ncursesw. Not sure why.
+our $arrowmap = {
+	'-x+y' => '`', # `⇖↖
+	'0x+y' => '^', # ^⇑↑
+	'+x+y' => '\'', # ’⇗↗
+	'-x0y' => '<', # <⇐←
+	'0x0y' => 'o', # ooo
+	'+x0y' => '>', # >⇒→
+	'-x-y' => ',', # ,⇙↙
+	'0x-y' => 'v', # v⇓↓
+	'+x-y' => '\\', # ?⇘↘
+};
 
 our $keymap = {
 	'[11~' => KEY_F( 1 ),
@@ -188,6 +201,7 @@ sub getInput {
 	}
 
 	undef $msg if (defined $msg && $msg eq "");
+	Plugins::callHook( getInput => { msg => $msg } ) if $msg;
 	return $msg;
 }
 
@@ -693,7 +707,7 @@ sub updateObjects {
 	return unless $char;
 
 	my $line = 0;
-	my $namelen = $self->{winObjectsWidth} - 9;
+	my $namelen = $self->{winObjectsWidth} - 9 - 2;
 	erase $self->{winObjects};
 
 	my $display = $self->{objectsMode} ? $self->{objectsMode} : $sys{curses_objects} || 'players, monsters, slaves, items, npcs';
@@ -724,12 +738,14 @@ sub updateObjects {
 		for (my $i = 0; $i < @$objectsID && $line < $self->{winObjectsHeight}; $i++) {
 			my $id = $objectsID->[$i];
 			next if ($id eq "");
+			next if !$objects->{$id};
 			next if $config{monster_filter} && $objectsID == \@monstersID && $objects->{$id}->{name_given} !~ /$config{monster_filter}/igs;
 			
 			my $lineStyle = $style;
 			my $idx = $i;
 			my $name;
 			my $count;
+			my $dir = '';
 			if ($_ eq 'skills') {
 				($idx,$name,$count) = ($objects->{$id}{ID}, Skill->new(handle => $id)->getName, $objects->{$id}{lv});
 				$lineStyle = 'normal' unless $objects->{$id}{sp};
@@ -748,6 +764,23 @@ sub updateObjects {
 				$lineStyle = 'yellow' if $char->{party}{users}{$id};
 			}
 
+			my $cpos = $char->{pos_to}           || $char->{pos};
+			my $opos = $objects->{$id}->{pos_to} || $objects->{$id}->{pos};
+			if ($opos) {
+				my $dx = $opos->{x} - $cpos->{x};
+				my $dy = $opos->{y} - $cpos->{y};
+				if (abs $dx >= 2 * abs $dy) {
+					$dir = $dx < 0 ? '-x0y' : '+x0y';
+				} elsif (abs $dy >= 2 * abs $dx) {
+					$dir = $dy < 0 ? '0x-y' : '0x+y';
+				} elsif ($dy > 0) {
+					$dir = $dx < 0 ? '-x+y' : '+x+y';
+				} else {
+					$dir = $dx < 0 ? '-x-y' : '+x-y';
+				}
+				$dir = $arrowmap->{$dir};
+			}
+
 			if ($_ eq 'slaves') {
 				$name .= " [$objects->{$id}->{given_name}]" if $objects->{$id}->{given_name} && $objects->{$id}->name ne $objects->{$id}->{given_name};
 			}
@@ -757,8 +790,8 @@ sub updateObjects {
 				$name = $self->swrite( '@' . ( '<' x ($namelen - 11) ) . ' @' . ( '<' x 9 ), $name, $bar );
 			}
 
-			$self->printw($self->{winObjects}, $line++, 0, "{bold|$lineStyle}@## {$lineStyle}@".("<"x$namelen)." {normal}@#",
-				$idx, $name, $count
+			$self->printw($self->{winObjects}, $line++, 0, "{bold|$lineStyle}@## {$lineStyle}@".("<"x$namelen)." {normal}@ @#",
+				$idx, $name, $dir, $count
 			);
 		}
 		if ($_ eq 'skills' && $line < $self->{winObjectsHeight}) {

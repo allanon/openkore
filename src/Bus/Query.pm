@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 5420 $
+#  $Id: Query.pm 5420 2007-01-31 12:15:52Z vcl_kore $
 #
 #########################################################################
 package Bus::Query;

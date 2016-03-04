@@ -23,7 +23,7 @@ use strict;
 use Carp::Assert;
 use Modules 'register';
 use bytes;
-no encoding 'utf8';
+no utf8;
 use enum qw(KNOWN_MESSAGE UNKNOWN_MESSAGE ACCOUNT_ID);
 
 ##
@@ -169,7 +169,11 @@ sub readNext {
 		$result = $$buffer;
 		$self->{buffer} = '';
 		$$type = UNKNOWN_MESSAGE;
+		our $last_msg;
+		Misc::visualDump($last_msg, "<< Previous packet was");
+		Misc::visualDump($result, "<< Received unknown packet");
 	}
+our $last_msg = $result;
 	return $result;
 }
 

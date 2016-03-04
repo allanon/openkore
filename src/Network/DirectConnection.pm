@@ -145,7 +145,7 @@ sub serverConnect {
 	});
 	return if ($return);
 
-	message TF("Connecting (%s:%s)... ", $host, $port), "connection";
+	message TF("Connecting (%s:%s)%s... ", $host, $port, $config{bindIp} ? " (local: $config{bindIp})" : ''), "connection";
 	$self->{remote_socket} = new IO::Socket::INET(
 			LocalAddr	=> $config{bindIp} || undef,
 			PeerAddr	=> $host,

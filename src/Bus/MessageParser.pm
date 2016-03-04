@@ -2,7 +2,7 @@ package Bus::MessageParser;
 
 use strict;
 use bytes;
-no encoding 'utf8';
+no utf8;
 use Bus::Messages qw(unserialize);
 
 sub new {

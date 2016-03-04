@@ -15,8 +15,8 @@
 #  GNU General Public License for more details.
 #
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 6932 $
+#  $Id: Dock.pm 6932 2009-10-31 20:44:45Z eternalharvest $
 #
 #########################################################################
 package Interface::Wx::Dock;

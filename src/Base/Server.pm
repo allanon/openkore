@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 7929 $
+#  $Id: Server.pm 7929 2012-01-18 18:10:31Z fr3dbr $
 #
 #########################################################################
 ##
@@ -263,6 +263,7 @@ sub _newClient {
 
 	my $sock = $self->{BS_server}->accept();
 	$sock->autoflush(0);
+	Log::message("Accepted incoming connection.\n", "connection");
 
 	my $fd = fileno($sock);
 	my $host = $sock->peerhost if ($sock->can('peerhost'));
@@ -279,6 +280,7 @@ sub _newClient {
 sub _exitClient {
 	my ($self, $client, $index) = @_;
 
+	Log::message("Client disconnected.\n", "connection");
 	$self->onClientExit($client, $index);
 	$self->{BS_clients}->remove($client);
 }

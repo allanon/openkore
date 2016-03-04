@@ -8,8 +8,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8720 $
+#  $Id: XKore.pm 8720 2013-11-14 12:58:15Z ya4ept $
 #
 #########################################################################
 package Network::XKore;
@@ -30,7 +30,7 @@ use Network;
 use Network::Send ();
 use Utils qw(dataWaiting timeOut);
 use Translation;
-use Misc qw(chatLog);
+
 
 ##
 # Network::XKore->new()
@@ -233,20 +233,7 @@ sub injectSync {
 # This function is meant to be run in the Kore main loop.
 sub checkConnection {
 	my $self = shift;
-
-	if ($timeout{play}{time} && timeOut($timeout{play}) && $conState ==5) {
-		$self->setState(Network::NOT_CONNECTED);
-		error T("Timeout on Map Server, "), "connection";
-		Plugins::callHook('disconnected');
-		if ($config{dcOnDisconnect}) {
-			error T("Auto disconnecting on Disconnect!\n");
-			chatLog("k", T("*** You disconnected, auto disconnect! ***\n"));
-			$quit = 1;
-		} else {
-			error "waiting actions for the Ragnarok Online client\n";
-		}
-	}
-
+	
 	return if ($self->serverAlive);
 	
 	# (Re-)initialize X-Kore if necessary
