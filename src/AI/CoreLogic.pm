@@ -43,181 +43,149 @@ use Task::UseSkill;
 use Task::ErrorReport;
 use Utils::Exceptions;
 
+our $ai_behaviors = { AI::OFF => [], AI::MANUAL => [], AI::AUTO => [] };
+
+register_behavior( AI::OFF    => \&processWipeOldActors );
+register_behavior( AI::OFF    => \&processGetPlayerInfo );
+register_behavior( AI::OFF    => \&processMisc );
+register_behavior( AI::OFF    => \&processPortalRecording );
+register_behavior( AI::MANUAL => \&processClientSuspend );
+register_behavior( AI::MANUAL => \&processFeed );
+register_behavior( AI::MANUAL => \&processLook );
+register_behavior( AI::MANUAL => \&processTaskNPC );
+register_behavior( AI::MANUAL => \&processTaskGenericManual );
+register_behavior( AI::MANUAL => \&processEquip );
+register_behavior( AI::MANUAL => \&processDrop );
+register_behavior( AI::MANUAL => \&processEscapeUnknownMaps );
+register_behavior( AI::MANUAL => \&processDelayedTeleport );
+register_behavior( AI::MANUAL => \&processTaskSitting );
+register_behavior( AI::MANUAL => \&processTaskStanding );
+register_behavior( AI::MANUAL => \&processAttack );
+register_behavior( AI::MANUAL => \&processSkillUse );
+register_behavior( AI::MANUAL => \&processAutoCommandUse );
+register_behavior( AI::MANUAL => \&processTaskRoute );
+register_behavior( AI::MANUAL => \&processTake );
+register_behavior( AI::MANUAL => \&processTaskMove );
+register_behavior( AI::MANUAL => \&processAutoItemUse );
+register_behavior( AI::MANUAL => \&processAutoSkillUse );
+register_behavior( AI::AUTO   => \&processTaskGenericAuto );
+register_behavior( AI::AUTO   => \&processChatQueue );
+register_behavior( AI::AUTO   => \&processDcOnPlayer );
+register_behavior( AI::AUTO   => \&processDeal );
+register_behavior( AI::AUTO   => \&processDealAuto );
+register_behavior( AI::AUTO   => \&processPartyAuto );
+register_behavior( AI::AUTO   => \&processGuildAutoDeny );
+register_behavior( AI::AUTO   => \&processDead );
+register_behavior( AI::AUTO   => \&processStorageGet );
+register_behavior( AI::AUTO   => \&processCartAdd );
+register_behavior( AI::AUTO   => \&processCartGet );
+register_behavior( AI::AUTO   => \&processAutoMakeArrow );
+register_behavior( AI::AUTO   => \&processAutoStorage );
+register_behavior( AI::AUTO   => \&processAutoSell );
+register_behavior( AI::AUTO   => \&processAutoBuy );
+register_behavior( AI::AUTO   => \&processAutoCart );
+register_behavior( AI::AUTO   => \&processFollow );
+register_behavior( AI::AUTO   => \&processSitAutoIdle );
+register_behavior( AI::AUTO   => \&processSitAuto );
+register_behavior( AI::AUTO   => \&processPartySkillUse );
+register_behavior( AI::AUTO   => \&processMonsterSkillUse );
+register_behavior( AI::AUTO   => \&processAutoEquip );
+register_behavior( AI::AUTO   => \&processAutoAttack );
+register_behavior( AI::AUTO   => \&processItemsTake );
+register_behavior( AI::AUTO   => \&processItemsAutoGather );
+register_behavior( AI::AUTO   => \&processItemsGather );
+register_behavior( AI::AUTO   => \&processLockMap );
+register_behavior( AI::AUTO   => \&processRandomWalk );
+register_behavior( AI::AUTO   => \&processAutoTeleport );
+register_behavior( AI::AUTO   => \&processAllowedMaps );
+register_behavior( AI::AUTO   => \&processAutoResponse );
+register_behavior( AI::AUTO   => \&processAvoid );
+register_behavior( AI::AUTO   => \&processSendEmotion );
+register_behavior( AI::AUTO   => \&processAutoShopOpen );
+register_behavior( AI::AUTO   => \&processRepairAuto );
+
+sub register_behavior {
+    my ( $ai_state, $handler ) = @_;
+    push @{ $ai_behaviors->{AI::OFF} }, $handler if $ai_state == AI::OFF;
+    push @{ $ai_behaviors->{AI::MANUAL} }, $handler if $ai_state == AI::OFF || $ai_state == AI::MANUAL;
+    push @{ $ai_behaviors->{AI::AUTO} }, $handler if $ai_state == AI::OFF || $ai_state == AI::MANUAL || $ai_state == AI::AUTO;
+}
+
 # This is the main function from which the rest of the AI
 # will be invoked.
 sub iterate {
-	Benchmark::begin("ai_prepare") if DEBUG;
-	processWipeOldActors();
-	processGetPlayerInfo();
-	processMisc();
-	processPortalRecording();
-	Benchmark::end("ai_prepare") if DEBUG;
+    if ( $AI != AI::OFF && $net->clientAlive() && !$sentWelcomeMessage && timeOut( $timeout{welcomeText} ) ) {
+        $messageSender->injectAdminMessage( $Settings::welcomeText ) if ( $config{'verbose'} && !$config{'XKore_silent'} );
+        $sentWelcomeMessage = 1;
+    }
 
-	return if $AI == AI::OFF;
-	if ($net->clientAlive() && !$sentWelcomeMessage && timeOut($timeout{welcomeText})) {
-		$messageSender->injectAdminMessage($Settings::welcomeText) if ($config{'verbose'} && !$config{'XKore_silent'});
-		$sentWelcomeMessage = 1;
-	}
+    my $args = {};
+    my ( $old_action, $old_size ) = ( AI::action, scalar @ai_seq );
+    Plugins::callHook( 'AI_pre', $args ) if $AI == AI::AUTO;
+    foreach my $behavior ( @{ $ai_behaviors->{$AI} } ) {
 
+        # If the behavior modified the AI queue, we're done for this iteration.
+        last if $old_action ne AI::action;
+        last if $old_size != @ai_seq;
 
-	##### MANUAL AI STARTS HERE #####
+        # Done if the previous action wants to abort.
+        last if $args->{return};
 
-	Plugins::callHook('AI_pre/manual');
-	Benchmark::begin("AI (part 1)") if DEBUG;
-	return if processClientSuspend();
-	Benchmark::begin("AI (part 1.1)") if DEBUG;
-	processFeed();
-	processLook();
-	$char->processTask('NPC');
-	processEquip();
-	processDrop();
-	processEscapeUnknownMaps();
-	Benchmark::end("AI (part 1.1)") if DEBUG;
-	Benchmark::begin("AI (part 1.2)") if DEBUG;
-	processDelayedTeleport();
-	$char->processTask("sitting");
-	$char->processTask("standing");
-	AI::Attack::process();
-	Benchmark::end("AI (part 1.2)") if DEBUG;
-	Benchmark::begin("AI (part 1.3)") if DEBUG;
-	processSkillUse();
-	processAutoCommandUse();
-
-# Identify whether there's a "clean" monster nearby without actually attacking it.
-my $can_route = 1;
-if ( $config{attackAuto} > 0 && AI::action eq 'route' && AI::args->{attackOnRoute} ) {
-    $can_route = !attackable_monster();
+        $behavior->($args);
+    }
+    Plugins::callHook( 'AI_post', $args ) if $AI == AI::AUTO;
 }
-if ($can_route) {
-	$char->processTask("route", onError => sub {
-		my ($task, $error) = @_;
-		if (!($task->isa('Task::MapRoute') && $error->{code} == Task::MapRoute::TOO_MUCH_TIME())
-		 && !($task->isa('Task::Route') && $error->{code} == Task::Route::TOO_MUCH_TIME())) {
-			error("$error->{message}\n");
-		}
-	});
+
+sub processTaskNPC           { $char->processTask( 'NPC' ); }
+sub processTaskGenericManual { $char->processTask( 'manual_task' );AI::dequeue while AI::action eq 'manual_task' && AI::args->getStatus == Task::STOPPED; }
+sub processTaskSitting       { $char->processTask( "sitting" ); }
+sub processTaskStanding      { $char->processTask( "standing" ); }
+sub processAttack            { AI::Attack::process(); }
+sub processTaskMove          { $char->processTask( 'move' ); }
+sub processTaskGenericAuto   { $char->processTask( 'auto_task' ); }
+sub processChatQueue         { ChatQueue::processFirst; }
+
+sub processTaskRoute {
+
+    # Identify whether there's a "clean" monster nearby without actually attacking it.
+    my $can_route = 1;
+    if ( $config{attackAuto} > 0 && AI::action eq 'route' && AI::args->{attackOnRoute} ) {
+        $can_route = !attackable_monster();
+    }
+    if ( $can_route ) {
+        $char->processTask(
+            "route",
+            onError => sub {
+                my ( $task, $error ) = @_;
+                if (   !( $task->isa( 'Task::MapRoute' ) && $error->{code} == Task::MapRoute::TOO_MUCH_TIME() )
+                    && !( $task->isa( 'Task::Route' ) && $error->{code} == Task::Route::TOO_MUCH_TIME() ) ) {
+                    error( "$error->{message}\n" );
+                }
+            }
+        );
+    }
 }
-	processTake();
-	$char->processTask('move');
-	Benchmark::end("AI (part 1.3)") if DEBUG;
+sub processDebug {
+    if ( timeOut( $ai_v{time}, 2 ) && $config{'debug'} >= 2 ) {
+        my $len = @ai_seq_args;
+        debug "AI: @ai_seq | $len\n", "ai", 2;
+        $ai_v{time} = time;
+    }
+    $ai_v{'AI_last_finished'} = time;
 
-	Benchmark::begin("AI (part 1.4)") if DEBUG;
-	Benchmark::begin("ai_autoItemUse") if DEBUG;
-	processAutoItemUse();
-	Benchmark::end("ai_autoItemUse") if DEBUG;
-	Benchmark::begin("ai_autoSkillUse") if DEBUG;
-	processAutoSkillUse();
-	Benchmark::end("ai_autoSkillUse") if DEBUG;
-	Benchmark::end("AI (part 1.4)") if DEBUG;
-
-	Benchmark::end("AI (part 1)") if DEBUG;
-
-
-
-	Misc::checkValidity("AI part 1");
-	return unless $AI == AI::AUTO;
-
-
-	##### AUTOMATIC AI STARTS HERE #####
-
-	Plugins::callHook('AI_pre');
-	Benchmark::begin("AI (part 2)") if DEBUG;
-
-	ChatQueue::processFirst;
-
-	processDcOnPlayer();
-	processDeal();
-	processDealAuto();
-	processPartyAuto();
-	processGuildAutoDeny();
-
-	Misc::checkValidity("AI part 1.1");
-	#processAutoBreakTime(); moved to a plugin
-	processDead();
-	processStorageGet();
-	processCartAdd();
-	processCartGet();
-	processAutoMakeArrow();
-	Benchmark::end("AI (part 2)") if DEBUG;
-	Misc::checkValidity("AI part 2");
-
-
-	Benchmark::begin("AI (part 3)") if DEBUG;
-	Benchmark::begin("AI (part 3.1)") if DEBUG;
-	processAutoStorage();
-	Misc::checkValidity("AI (autostorage)");
-	processAutoSell();
-	Misc::checkValidity("AI (autosell)");
-	processAutoBuy();
-	Misc::checkValidity("AI (autobuy)");
-	processAutoCart();
-	Misc::checkValidity("AI (autocart)");
-	Benchmark::end("AI (part 3.1)") if DEBUG;
-
-	Benchmark::begin("AI (part 3.2)") if DEBUG;
-	processLockMap();
-	#processAutoStatsRaise(); moved to a task
-	#processAutoSkillsRaise(); moved to a task
-	#processTask("skill_raise");
-	processRandomWalk();
-if (!$field || !$field->baseName) { our $fieldTO ||= { time => 0, timeout => 1 }; if (timeout($fieldTO)) { $fieldTO->{time} = time; Log::message("FIELD IS EMPTY!!\n"); } }
-	processFollow();
-	Benchmark::end("AI (part 3.2)") if DEBUG;
-
-	Benchmark::begin("AI (part 3.3)") if DEBUG;
-	processSitAutoIdle();
-	processSitAuto();
-
-
-	Benchmark::end("AI (part 3.3)") if DEBUG;
-	Benchmark::end("AI (part 3)") if DEBUG;
-
-	Benchmark::begin("AI (part 4)") if DEBUG;
-	processPartySkillUse();
-	processMonsterSkillUse();
-
-	Misc::checkValidity("AI part 3");
-	processAutoEquip();
-	processAutoAttack() if $config{attackAuto} > -1;
-	processItemsTake();
-	processItemsAutoGather();
-	processItemsGather();
-	processAutoTeleport();
-	processAllowedMaps();
-	processAutoResponse();
-	processAvoid();
-	processSendEmotion();
-	processAutoShopOpen();
-	processRepairAuto();
-	Benchmark::end("AI (part 4)") if DEBUG;
-
-
-	##########
-
-	# DEBUG CODE
-	if (timeOut($ai_v{time}, 2) && $config{'debug'} >= 2) {
-		my $len = @ai_seq_args;
-		debug "AI: @ai_seq | $len\n", "ai", 2;
-		$ai_v{time} = time;
-	}
-	$ai_v{'AI_last_finished'} = time;
-
-	if ($cmdQueue && timeOut($cmdQueueStartTime,$cmdQueueTime)) {
-		my $execCommand = '';
-		if (@cmdQueueList) {
-			$execCommand = join (";;", @cmdQueueList);
-		} else {
-			$execCommand = $cmdQueueList[0];
-		}	
-		@cmdQueueList = ();
-		$cmdQueue = 0;
-		$cmdQueueTime = 0;
-		debug "Executing queued command: $execCommand\n", "ai";
-		Commands::run($execCommand);
-	}
-
-
-	Plugins::callHook('AI_post');
+    if ( $cmdQueue && timeOut( $cmdQueueStartTime, $cmdQueueTime ) ) {
+        my $execCommand = '';
+        if ( @cmdQueueList ) {
+            $execCommand = join( ";;", @cmdQueueList );
+        } else {
+            $execCommand = $cmdQueueList[0];
+        }
+        @cmdQueueList = ();
+        $cmdQueue     = 0;
+        $cmdQueueTime = 0;
+        debug "Executing queued command: $execCommand\n", "ai";
+        Commands::run( $execCommand );
+    }
 }
 
 
@@ -311,7 +279,7 @@ sub processMisc {
 # The clientSuspend AI sequence is used to freeze all other AI activity
 # for a certain period of time.
 sub processClientSuspend {
-	my $result = 0;
+	my ($args) = @_;
 	if (AI::action eq 'clientSuspend' && timeOut(AI::args)) {
 		debug "AI suspend by clientSuspend dequeued\n";
 		AI::dequeue;
@@ -368,12 +336,11 @@ sub processClientSuspend {
 		}
 
 		# Client suspended, do not continue with AI
-		$result = 1;
+		$args->{return} = 1;
 	} elsif (AI::action eq "clientSuspend") { # Should be called only if AI Suspend itself. (this mode used in AI::CoreLogic::processItemsTake and AI::CoreLogic::processAllowedMaps)
 		# Client suspended, do not continue with AI
-		$result = 1;
+		$args->{return} = 1;
 	}
-	return $result;
 }
 
 sub processLook {
@@ -1422,6 +1389,7 @@ sub processAutoStorage {
 				return;
 			}
 
+#0: storageAuto {distance=>'10',sentStore=>'1',npc=>{ok=>'1',map=>'prontera',pos=>{y=>'89',x=>'146'}}}
 			if (defined($args->{getStart}) && $args->{done} != 1) {
 				Misc::checkValidity("AutoStorage part 3");
 				while (exists $config{"getAuto_$args->{index}"}) {
@@ -2748,6 +2716,7 @@ sub processAutoEquip {
 
 # All of the logic of processAutoAttack without the actual attack action.
 sub attackable_monster {
+	return if $config{attackAuto} == -1;
 	return if (!$field);
 	if ((AI::isIdle || AI::is(qw/route follow sitAuto take items_gather items_take/) || (AI::action eq "mapRoute" && AI::args->{stage} eq 'Getting Map Solution'))
 	     # Don't auto-attack monsters while taking loot, and itemsTake/GatherAuto >= 2
@@ -2896,6 +2865,7 @@ sub attackable_monster {
 
 ##### AUTO-ATTACK #####
 sub processAutoAttack {
+	return if $config{attackAuto} == -1;
 	# The auto-attack logic is as follows:
 	# 1. Generate a list of monsters that we are allowed to attack.
 	# 2. Pick the "best" monster out of that list, and attack it.
@@ -2992,7 +2962,9 @@ sub processAutoAttack {
 				}
 
 				my $control = mon_control($monster->{name});
-				if (!AI::is(qw/sitAuto take items_gather items_take/)
+				if (AI::action ne 'sitAuto'
+				 && !($config{'itemsTakeAuto'} >= 2 && AI::is(qw/take items_take/))
+				 && !($config{'itemsGatherAuto'} >= 2 && AI::is(qw/take items_gather/))
 				 && $config{'attackAuto'} >= 2
 				 && ($control->{attack_auto} == 1 || $control->{attack_auto} == 3)
 				 && (!$config{'attackAuto_onlyWhenSafe'} || isSafe())
@@ -3074,6 +3046,9 @@ sub processItemsTake {
 		my $foundID;
 		my ($dist, $dist_to);
 
+		# TODO: Scan items from all items_take actions on the AI queue and pick the closest one.
+		# TODO: If the pos and/or pos_to are now offscreen, move close enough to see if there are any items close to them.
+		# TODO: Keep a list of more than just two locations to scan? And choose the closest item to take. Pay attention to pickupitems>1? (eg, if a ranged attacker killed a monster and it dropped a card, go get it even if other items are closer)
 		foreach (@itemsID) {
 			next unless $_;
 			my $item = $items{$_};
