@@ -48,7 +48,7 @@ mid_camp 210 292 dali 141 82 0 c r0 n
 # Geffen Magic Tournament
 
 # Bathory in Eden Kitchen
-moc_para01 174 33 id=50121 niflheim 194 185 1000 c c r0 n
+moc_para01 174 33 id=50118 niflheim 194 185 1000 c c r0 n
 
 # requires Ring of the Ancient Wise King
 manuk 321 182 dic_dun01 33 212 0 r0 n
@@ -3606,3 +3606,7 @@ que_job01 68 96 que_job01 17 53
 que_job01 6 94 morocc 45 103
 job_gun 165 22 job_gun 196 35
 job_gun 197 49 job_gun 157 21
+izlude_a 20 98 prt_fild08 367 212
+izlude_a 125 257 iz_ac01_a 99 29
+iz_ac01_a 100 24 izlude_a 127 253
+izlude_a 110 182 izlude_in 65 87

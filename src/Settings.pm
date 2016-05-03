@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision$
-#  $Id$
+#  $Revision: 8874 $
+#  $Id: Settings.pm 8874 2014-06-15 22:00:44Z windhamwong $
 #
 #########################################################################
 ##
@@ -42,6 +42,7 @@
 package Settings;
 
 use strict;
+use lib 'plugins';
 use lib 'src/deps';
 use lib 'src';
 use Exporter;
@@ -115,6 +116,8 @@ our $dead_log_file;
 our $interface;
 our $lockdown;
 our $no_connect;
+our $starting_ai;
+our $command;
 
 
 my $pathDelimiter = ($^O eq 'MSWin32') ? ';' : ':';
@@ -179,6 +182,8 @@ sub parseArguments {
 
 		'interface=s',        \$interface,
 		'lockdown',           \$lockdown,
+		'ai=s',               \$starting_ai,
+		'command=s',          \$command,
 		'help',	              \$options{help},
 		'version|v',          \$options{version},
 
@@ -216,6 +221,11 @@ sub parseArguments {
 		} else {
 			$interface = "Console"
 		}
+	}
+	if ($starting_ai) {
+		$Globals::AI = AI::AUTO()   if $starting_ai =~ /^(on|auto)$/;
+		$Globals::AI = AI::MANUAL() if $starting_ai =~ /^manual$/;
+		$Globals::AI = AI::OFF()    if $starting_ai =~ /^off$/;
 	}
 
 	return 0 if ($options{help});
@@ -286,6 +296,8 @@ sub getUsageText {
 		Other options:
 		--interface=NAME          Which interface to use at startup.
 		--lockdown                Disable potentially insecure features.
+		--ai                      Starting AI mode (on, manual, off) (default: on)
+		--command=COMMAND         Initial command to place on the AI queue
 		--help                    Displays this help message.
 		--version                 Displays the program version.
 

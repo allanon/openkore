@@ -22,6 +22,7 @@ use Carp::Assert;
 use Time::HiRes qw(time);
 
 use Globals;
+use Network::Send ();
 use AI;
 use Actor;
 use Field;
@@ -190,7 +191,7 @@ sub finishAttacking {
 
 		# Pickup loot when monster's dead
 		if ($AI == AI::AUTO && $config{'itemsTakeAuto'} && $monsters_old{$ID}{dmgFromYou} > 0 && !$monsters_old{$ID}{ignore}) {
-			AI::clear("items_take");
+			# AI::clear("items_take");
 			ai_items_take($monsters_old{$ID}{pos}{x}, $monsters_old{$ID}{pos}{y},
 				      $monsters_old{$ID}{pos_to}{x}, $monsters_old{$ID}{pos_to}{y});
 		} else {

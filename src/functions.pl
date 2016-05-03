@@ -64,6 +64,10 @@ sub mainLoop {
 		Misc::checkValidity("parseInput");
 	}
 
+	if ($state == STATE_INITIALIZED && $Settings::command) {
+		Commands::run($Settings::command);
+		$Settings::command = undef;
+	}
 
 	if ($state == STATE_INITIALIZED) {
 		Plugins::callHook('mainLoop_pre');
@@ -161,7 +165,7 @@ sub loadDataFiles {
 	Settings::addControlFile('overallAuth.txt',
 		loader => [\&parseDataFile, \%overallAuth]);
 	Settings::addControlFile('pickupitems.txt',
-		loader => [\&parseDataFile_lc, \%pickupitems]);
+		loader => [\&parseDataFile_multiValue_lc, \%pickupitems, [qw(flag weight)], \%pickupitems_r]);
 	Settings::addControlFile('responses.txt',
 		loader => [\&parseResponses, \%responses]);
 	Settings::addControlFile('timeouts.txt',
