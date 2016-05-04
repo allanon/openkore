@@ -31,7 +31,7 @@ NPC 200
 # Maps where you can exit to the same place you came from,
 # which confuses routing if added to portals thoughtlessly.
 bat_room 10000
-moc_para01 10000
+#moc_para01 10000
 
 # Avoid trying to route through prt_fild08a (which may not even exist) unless required to do so.
 prt_fild08a 10000

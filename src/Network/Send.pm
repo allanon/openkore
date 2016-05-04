@@ -9,8 +9,8 @@
 #  also distribute the source code.
 #  See http://www.gnu.org/licenses/gpl.html for the full license.
 #
-#  $Revision: 8896 $
-#  $Id: Send.pm 8896 2014-08-23 01:27:13Z ya4ept $
+#  $Revision$
+#  $Id$
 #
 #########################################################################
 ##
@@ -706,6 +706,12 @@ sub sendDrop {
 	debug "Sent drop: $index x $amount\n", "sendPacket", 2;
 }
 
+sub sendItemUse {
+	my ($self, $index, $targetID) = @_;
+	$self->sendToServer($self->reconstruct({switch => 'item_use', index => $index, targetID => $targetID}));
+	debug "Item Use: $index\n", "sendPacket", 2;
+}
+
 # for old plugin compatibility, use sendRestart instead!
 sub sendRespawn { $_[0]->sendRestart(0) }
 
@@ -805,7 +811,7 @@ sub sendBuyBulkBuyer {
 	#FIXME not working yet
 	#field index still wrong and remain unknown
 	my ($self, $buyerID, $r_array, $buyingStoreID) = @_;
-	my $msg = pack('v2', 0x0819, 4+8*@{$r_array});
+	my $msg = pack('v2', 0x0819, 12+6*@{$r_array});
 	$msg .= pack ('a4 a4', $buyerID, $buyingStoreID);
 	for (my $i = 0; $i < @{$r_array}; $i++) {
 		debug 'Send Buying Buyer Request: '.$r_array->[$i]{itemIndex}.' '.$r_array->[$i]{itemID}.' '.$r_array->[$i]{amount}."\n", "sendPacket", 2;
@@ -1187,6 +1193,23 @@ sub sendEquip {
 		)
 	);
 	debug "Sent Equip: $index Type: $type\n" , 2;
+}
+
+sub sendProgress {
+	my ($self) = @_;
+	my $msg = pack("C*", 0xf1, 0x02);
+	$self->sendToServer($msg);
+	debug "Sent Progress Bar Finish\n", "sendPacket", 2;
+}
+
+sub sendProduceMix {
+	my ($self, $ID,
+		# nameIDs for added items such as Star Crumb or Flame Heart
+		$item1, $item2, $item3) = @_;
+
+	my $msg = pack('v5', 0x018E, $ID, $item1, $item2, $item3);
+	$self->sendToServer($msg);
+	debug "Sent Forge, Produce Item: $ID\n" , 2;
 }
 
 1;

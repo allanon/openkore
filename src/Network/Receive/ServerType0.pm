@@ -413,6 +413,7 @@ sub new {
 		'02B7' => ['quest_active', 'V C', [qw(questID active)]],
 		'02B8' => ['party_show_picker', 'a4 v C3 a8 v C', [qw(sourceID nameID identified broken upgrade cards location type)]],
 		'02B9' => ['hotkeys'],
+		'02C1' => ['npc_chat', 'v V2 a24', [qw(len accountID color msg)]],
 		'02C5' => ['party_invite_result', 'Z24 V', [qw(name type)]],
 		'02C6' => ['party_invite', 'a4 Z24', [qw(ID name)]],
 		'02C9' => ['party_allow_invite', 'C', [qw(type)]],
@@ -550,8 +551,12 @@ sub new {
 		'099D' => ['received_characters', 'v a*', [qw(len charInfo)]],
 		'099F' => ['area_spell_multiple2', 'v a*', [qw(len spellInfo)]], # -1
 		'09A0' => ['sync_received_characters', 'V', [qw(sync_Count)]],
-		'09CF' => ['gameguard_request'],
-		'0A27' => ['hp_sp_changed', 'v2', [qw(type amount)]],
+		'09CA' => ['area_spell_multiple3', 'v a*', [qw(len spellInfo)]], # -1
+		'09CD' => ['message_string', 'v V', [qw(msg_id para1)]], #8
+ 		'09CF' => ['gameguard_request'],
+ 		'0A27' => ['hp_sp_changed', 'v2', [qw(type amount)]],
+		'0A34' => ['senbei_amount', 'V', [qw(amount)]], #new senbei system (new cash currency)
+		'C350' => ['senbei_vender_items_list'], #new senbei vender, need research
 	};
 
 	# Item RECORD Struct's
@@ -1037,8 +1042,8 @@ sub parse_items_nonstackable {
 		# packet, so we must assume one.  We'll even play it safe, and
 		# not change the amount if it's already a non-zero value.
 		$item->{amount} = 1 unless ($item->{amount});
-		$item->{broken} = $item->{identified} & 2 unless exists $item->{broken};
-		$item->{identified} = $item->{identified} & 1;
+		$item->{broken} = $item->{identified} & (1 << 1) unless exists $item->{broken};
+		$item->{identified} = $item->{identified} & (1 << 0);
 	})
 }
 
@@ -1916,6 +1921,7 @@ sub deal_begin {
 			} else {
 				$currentDeal{name} = T('Unknown #') . unpack("V", $ID);
 			}
+			undef %outgoingDeal;
 		}
 		message TF("Engaged Deal with %s\n", $currentDeal{name}), "deal";
 	} elsif ($args->{type} == 5) {
@@ -2064,7 +2070,7 @@ sub emoticon {
 sub equip_item {
 	my ($self, $args) = @_;
 	my $item = $char->inventory->getByServerIndex($args->{index});
-	if ((!$args->{success} & $args->{switch} eq "00AA") || ($args->{success} & $args->{switch} eq "0999")) {
+	if ((!$args->{success} && $args->{switch} eq "00AA") || ($args->{success} && $args->{switch} eq "0999")) {
 		message TF("You can't put on %s (%d)\n", $item->{name}, $item->{invIndex});
 	} else {
 		$item->{equipped} = $args->{type};
@@ -2381,7 +2387,10 @@ sub slave_calcproperty_handler {
 	$slave->{sp_max}       = ($args->{sp_max} > 0) ? $args->{sp_max} : $args->{sp};
 =cut
 
-	$slave->{attack_speed}     = int (200 - (($args->{attack_delay} < 10) ? 10 : ($args->{attack_delay} / 10)));
+	$slave->{attack_speed}     = int (200 - (($args->{aspd} < 10) ? 10 : ($args->{aspd} / 10)));
+	$slave->{hpPercent}    = $slave->{hp_max} ? ($slave->{hp} / $slave->{hp_max}) * 100 : undef;
+	$slave->{spPercent}    = $slave->{sp_max} ? ($slave->{sp} / $slave->{sp_max}) * 100 : undef;
+	$slave->{expPercent}   = ($args->{exp_max}) ? ($args->{exp} / $args->{exp_max}) * 100 : undef;
 }
 
 sub gameguard_grant {
@@ -3681,9 +3690,10 @@ sub npc_talk {
 =cut
 
 	# Remove RO color codes
+	$talk{msg} =~ s/\^[a-fA-F0-9]{6}//g;
 	$msg =~ s/\^[a-fA-F0-9]{6}//g;
-
-    # Prepend existing conversation.
+ 
+	# Prepend existing conversation.
 	$talk{msg} .= "\n" if $talk{msg};
 	$talk{msg} .= $msg;
 
@@ -4790,8 +4800,8 @@ sub sense_result {
 			$args->{spirit}, $args->{undead}), "list";
 }
 
-# Your shop has sold an item
-# Need a hook.
+# Your shop has sold an item -- one packet sent per item sold.
+#
 sub shop_sold {
 	my ($self, $args) = @_;
 
@@ -4806,6 +4816,21 @@ sub shop_sold {
 	my $msg = TF("sold: %s - %s %sz\n", $amount, $articles[$number]{name}, $earned);
 	shopLog($msg);
 	message($msg, "sold");
+
+	# Call hook before we possibly remove $articles[$number] or
+	# $articles itself as a result of the sale.
+	Plugins::callHook(
+		'vending_item_sold',
+		{
+			#These first two entries are equivalent to $args' contents.
+			'vendShopIndex' => $number,
+			'amount' => $amount,
+			'vendArticle' => $articles[$number], #This is a hash
+		}
+	);
+
+	# Adjust the shop's articles for sale, and notify if the sold
+	# item and/or the whole shop has been sold out.
 	if ($articles[$number]{quantity} < 1) {
 		message TF("sold out: %s\n", $articles[$number]{name}), "sold";
 		#$articles[$number] = "";
@@ -4814,8 +4839,9 @@ sub shop_sold {
 			closeShop();
 		}
 	}
-}
+}##end shop_sold()
 
+ 
 # TODO:
 # Add 'dispose' support
 sub skill_cast {
@@ -5029,6 +5055,11 @@ sub skill_use {
 	}
 	$target->{sitting} = 0 unless $args->{type} == 4 || $args->{type} == 9 || $args->{damage} == 0;
 
+	#EFST_MAGICPOWER OVERRIDE
+	if ($args->{sourceID} eq $accountID	&& $char->statusActive('EFST_MAGICPOWER') && $args->{skillID} != 366) {
+		$char->setStatus("EFST_MAGICPOWER", 0);
+	}
+	
 	Plugins::callHook('packet_skilluse', {
 			'skillID' => $args->{skillID},
 			'sourceID' => $args->{sourceID},
@@ -5113,6 +5144,11 @@ sub skill_use_location {
 	my $domain = ($sourceID eq $accountID) ? "selfSkill" : "skill";
 	message $disp, $domain;
 
+	#EFST_MAGICPOWER OVERRIDE
+	if ($args->{sourceID} eq $accountID	&& $char->statusActive('EFST_MAGICPOWER') && $args->{skillID} != 366) {
+		$char->setStatus("EFST_MAGICPOWER", 0);
+	}
+	
 	Plugins::callHook('packet_skilluse', {
 		'skillID' => $skillID,
 		'sourceID' => $sourceID,
@@ -5192,6 +5228,12 @@ sub skill_used_no_damage {
 			}
 		}
 	}
+	
+	#EFST_MAGICPOWER OVERRIDE
+	if ($args->{sourceID} eq $accountID	&& $char->statusActive('EFST_MAGICPOWER') && $args->{skillID} != 366) {
+		$char->setStatus("EFST_MAGICPOWER", 0);
+	}
+	
 	Plugins::callHook('packet_skilluse', {
 		skillID => $args->{skillID},
 		sourceID => $args->{sourceID},
@@ -5481,6 +5523,10 @@ our %stat_info_handlers = (
 
 		return unless $actor->isa('Actor::You');
 
+		Plugins::callHook('base_level_changed', {
+			level	=> $actor->{lv}
+		});
+
 		if ($config{dcOnLevel} && $actor->{lv} >= $config{dcOnLevel}) {
 			message TF("Disconnecting on level %s!\n", $config{dcOnLevel});
 			chatLog("k", TF("Disconnecting on level %s!\n", $config{dcOnLevel}));
@@ -5509,6 +5555,12 @@ our %stat_info_handlers = (
 		), 'info', $actor->isa('Actor::You') ? 1 : 2 if $change;
 
 		return unless $actor->isa('Actor::You');
+
+		Plugins::callHook('zeny_change', {
+			zeny	=> $actor->{zeny},
+			change	=> $change,
+		});
+
 
 		if ($config{dcOnZeny} && $actor->{zeny} <= $config{dcOnZeny}) {
 			$messageSender->sendQuit();
@@ -5573,6 +5625,10 @@ our %stat_info_handlers = (
 		message sprintf($actor->verb("%s are now job level %d\n", "%s is now job level %d\n"), $actor, $actor->{lv_job}), "success", $actor->isa('Actor::You') ? 1 : 2;
 
 		return unless $actor->isa('Actor::You');
+		
+		Plugins::callHook('job_level_changed', {
+			level	=> $actor->{lv_job}
+		});
 
 		if ($config{dcOnJobLevel} && $actor->{lv_job} >= $config{dcOnJobLevel}) {
 			message TF("Disconnecting on job level %d!\n", $config{dcOnJobLevel});
@@ -5733,8 +5789,8 @@ sub character_equip {
 
 	my $msg = '';
 	$msg .= T("---------Equipment List--------\n");
-	$msg .= "Name: $args->{name}\n";
-	$msg .= TF("%-${w}s : %s\n", $equipTypes_lut{$_->{equipped}}, $_->{name}) foreach sort { $a->{sort} <=> $b->{sort} } @items;
+	$msg .= TF("Name: %s\n", $args->{name});
+	$msg .= "%-${w}s : %s\n", $equipTypes_lut{$_->{equipped}}, $_->{name} foreach sort { $a->{sort} <=> $b->{sort} } @items;
 	$msg .= "-------------------------------\n";
 	message($msg, "list");
 }
@@ -6070,6 +6126,8 @@ sub users_online {
 	message TF("There are currently %s users online\n", $args->{users}), "info";
 }
 
+
+# You see a vender!  Add them to the visible venders list.
 sub vender_found {
 	my ($self, $args) = @_;
 	my $ID = $args->{ID};
@@ -6142,7 +6200,7 @@ sub vender_items_list {
 			[$index, $item->{name}, $itemTypes_lut{$item->{type}}, formatNumber($item->{amount}), formatNumber($item->{price})]),
 			($config{showDomain_Shop}?$config{showDomain_Shop}:"list"));
 	}
-	message("-------------------------------------------------------------------------------\n", "list");
+	message("-------------------------------------------------------------------------------\n", ($config{showDomain_Shop}?$config{showDomain_Shop}:"list"));
 
 	Plugins::callHook('packet_vender_store2', {
 		venderID => $venderID,
@@ -6158,6 +6216,8 @@ sub vender_lost {
 	delete $venderLists{$ID};
 }
 
+
+# Buy from a vending shop -- failed for one of 2+ reasons
 sub vender_buy_fail {
 	my ($self, $args) = @_;
 
@@ -7561,10 +7621,53 @@ sub skill_msg {
 	#	'07E6' => ['skill_msg', 'v V', [qw(id msgid)]], #TODO: PACKET_ZC_MSG_SKILL     **msgtable
 }
 
+sub quest_all_list2 {
+	my ($self, $args) = @_;
+	$questList = {};
+	my $msg;
+	my ($questID, $active, $time_start, $time, $mission_amount);
+	my $i = 0;
+	my ($mobID, $count, $amount, $mobName);
+	while ($i < $args->{RAW_MSG_SIZE} - 8) {
+		$msg = substr($args->{message}, $i, 15);
+		($questID, $active, $time_start, $time, $mission_amount) = unpack('V C V2 v', $msg);
+		$questList->{$questID}->{active} = $active;
+		debug "$questID $active\n", "info";
+
+		my $quest = \%{$questList->{$questID}};
+		$quest->{time_start} = $time_start;
+		$quest->{time} = $time;
+		$quest->{mission_amount} = $mission_amount;
+		debug "$questID $time_start $time $mission_amount\n", "info";
+		$i += 15;
+
+		if ($mission_amount > 0) {
+			for (my $j = 0 ; $j < $mission_amount ; $j++) {
+				$msg = substr($args->{message}, $i, 32);
+				($mobID, $count, $amount, $mobName) = unpack('V v2 Z24', $msg);
+				my $mission = \%{$quest->{missions}->{$mobID}};
+				$mission->{mobID} = $mobID;
+				$mission->{count} = $count;
+				$mission->{amount} = $amount;
+				$mission->{mobName_org} = $mobName;
+				$mission->{mobName} = bytesToString($mobName);
+				debug "- $mobID $count / $amount $mobName\n", "info";
+				$i += 32;
+			}
+		}
+	}
+}
+
 sub show_script {
 	my ($self, $args) = @_;
 	
 	debug "$args->{ID}\n", 'parseMsg';
+}
+
+sub senbei_amount {
+	my ($self, $args) = @_;
+	
+	$char->{senbei} = $args->{senbei};
 }
 
 1;

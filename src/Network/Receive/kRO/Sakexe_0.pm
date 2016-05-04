@@ -27,7 +27,7 @@ use AI;
 use Log qw(message warning error debug);
 
 # from old receive.pm
-use encoding 'utf8';
+use utf8;
 use Carp::Assert;
 use Scalar::Util;
 use Exception::Class ('Network::Receive::InvalidServerType', 'Network::Receive::CreationError');
@@ -352,6 +352,8 @@ sub new {
 		'08D1' => ['unequip_item', 'v2 C', [qw(index type success)]],
 		'08D2' => ['high_jump', 'a4 v2', [qw(ID x y)]], # 10
 		'0977' => ['monster_hp_info', 'a4 V V', [qw(ID hp hp_max)]],
+		'02F0' => ['progress_bar', 'V2', [qw(color time)]],
+		'02F2' => ['progress_bar_stop'],
 	};
 
 	# Item RECORD Struct's
@@ -385,7 +387,7 @@ sub new {
 			type6 => {
 				len => 31,
 				types => 'v2 C V2 C a8 l v2 C',
-				keys => [qw(index nameID type type_equip equipped upgrade cards expire bindOnEquipType sprite_id flag)],
+				keys => [qw(index nameID type type_equip equipped upgrade cards expire bindOnEquipType sprite_id identified)],
 			},
 		},
 		items_stackable => {
@@ -739,19 +741,6 @@ sub actor_muted {
 	}
 }
 
-# TODO: translation-friendly messages
-sub actor_status_active {
-	my ($self, $args) = @_;
-
-	return unless changeToInGameState();
-	my ($type, $ID, $flag, $tick) = @{$args}{qw(type ID flag tick)};
-
-	my $status = defined $statusHandle{$type} ? $statusHandle{$type} : "UNKNOWN_STATUS_$type";
-
-	$args->{skillName} = defined $statusName{$status} ? $statusName{$status} : $status;
-	($args->{actor} = Actor::get($ID))->setStatus($status, $flag, $tick);
-}
-
 sub actor_trapped {
 	my ($self, $args) = @_;
 	# original comment was that ID is not a valid ID
@@ -925,7 +914,7 @@ sub card_merge_status {
 		# Rename the slotted item now
 		# FIXME: this is unoptimized
 		use bytes;
-		no utf8;
+		no encoding 'utf8';
 		my $newcards = '';
 		my $addedcard;
 		for (my $i = 0; $i < 4; $i++) {
@@ -1790,12 +1779,16 @@ sub exp_zeny_info {
 			message TF("You gained %s zeny.\n", formatNumber($change));
 		} elsif ($change < 0) {
 			message TF("You lost %s zeny.\n", formatNumber(-$change));
-			if ($config{dcOnZeny} && $args->{val} <= $config{dcOnZeny}) {
-				$messageSender->sendQuit();
-				error (TF("Auto disconnecting due to zeny lower than %s!\n", $config{dcOnZeny}));
-				chatLog("k", T("*** You have no money, auto disconnect! ***\n"));
-				quit();
-			}
+		}
+		Plugins::callHook('zeny_change', {
+			zeny	=> $args->{val},
+			change	=> $change,
+		});
+		if ($config{dcOnZeny} && $args->{val} <= $config{dcOnZeny}) {
+			$messageSender->sendQuit();
+			error (TF("Auto disconnecting due to zeny lower than %s!\n", $config{dcOnZeny}));
+			chatLog("k", T("*** You have no money, auto disconnect! ***\n"));
+			quit();
 		}
 		$char->{zeny} = $args->{val};
 		debug "zeny: $args->{val}\n", "parseMsg";
@@ -1813,21 +1806,6 @@ sub exp_zeny_info {
 		debug("Required Job Exp: $args->{val}\n", "parseMsg");
 		message TF("BaseExp: %s | JobExp: %s\n", $monsterBaseExp, $monsterJobExp), "info", 2 if ($monsterBaseExp);
 	}
-}
-
-sub forge_list {
-	my ($self, $args) = @_;
-
-	message T("========Forge List========\n");
-	for (my $i = 4; $i < $args->{RAW_MSG_SIZE}; $i += 8) {
-		my $viewID = unpack('v', substr($args->{RAW_MSG}, $i, 2));
-		message "$viewID $items_lut{$viewID}\n";
-		# always 0x0012
-		#my $unknown = unpack("v1", substr($args->{RAW_MSG}, $i+2, 2));
-		# ???
-		#my $charID = substr($args->{RAW_MSG}, $i+4, 4);
-	}
-	message "=========================\n";
 }
 
 # TODO: test optimized unpacking
@@ -2011,12 +1989,16 @@ sub homunculus_state_handler {
 sub slave_calcproperty_handler {
 	my ($slave, $args) = @_;
 	# so we don't devide by 0
+	# wtf
+=pod
 	$slave->{hp_max}       = ($args->{hp_max} > 0) ? $args->{hp_max} : $args->{hp};
 	$slave->{sp_max}       = ($args->{sp_max} > 0) ? $args->{sp_max} : $args->{sp};
+=cut
 
-	$slave->{attack_speed}     = int (200 - (($args->{attack_delay} < 10) ? 10 : ($args->{attack_delay} / 10)));
-	$slave->{hpPercent}    = ($slave->{hp} / $slave->{hp_max}) * 100;
-	$slave->{spPercent}    = ($slave->{sp} / $slave->{sp_max}) * 100;
+	$slave->{attack_speed}     = int (200 - (($args->{aspd} < 10) ? 10 : ($args->{aspd} / 10)));
+	$slave->{hpPercent}    = $slave->{hp_max} ? ($slave->{hp} / $slave->{hp_max}) * 100 : undef;
+	$slave->{spPercent}    = $slave->{sp_max} ? ($slave->{sp} / $slave->{sp_max}) * 100 : undef;
+	$slave->{expPercent}   = ($args->{exp_max}) ? ($args->{exp} / $args->{exp_max}) * 100 : undef;
 }
 
 sub gameguard_grant {
@@ -4966,6 +4948,11 @@ sub stat_info {
 	} elsif ($args->{type} == 11) {
 		$char->{lv} = $args->{val};
 		message TF("You are now level %s\n", $args->{val}), "success";
+
+		Plugins::callHook('base_level_changed', {
+			level	=> $args->{val}
+		});
+
 		if ($config{dcOnLevel} && $char->{lv} >= $config{dcOnLevel}) {
 			message TF("Disconnecting on level %s!\n", $config{dcOnLevel});
 			chatLog("k", TF("Disconnecting on level %s!\n", $config{dcOnLevel}));
@@ -5023,6 +5010,11 @@ sub stat_info {
 	} elsif ($args->{type} == 55) {
 		$char->{lv_job} = $args->{val};
 		message TF("You are now job level %s\n", $args->{val}), "success";
+		
+		Plugins::callHook('job_level_changed', {
+			level	=> $args->{val}
+		});
+		
 		if ($config{dcOnJobLevel} && $char->{lv_job} >= $config{dcOnJobLevel}) {
 			message TF("Disconnecting on job level %s!\n", $config{dcOnJobLevel});
 			chatLog("k", TF("Disconnecting on job level %s!\n", $config{dcOnJobLevel}));
@@ -5559,7 +5551,7 @@ sub vending_start {
 	# FIXME: Read the packet the server sends us to determine
 	# the shop title instead of using $shop{title}.
 	my $display = center(" $shop{title} ", 79, '-') . "\n" .
-		T("#  Name                                        Type         Amount        Price\n");
+		T("#  Name                                   Type            Amount          Price\n");
 	for (my $i = 8; $i < $msg_size; $i += 22) {
 		my $number = unpack("v1", substr($msg, $i + 4, 2));
 		my $item = $articles[$number] = {};
@@ -5577,7 +5569,7 @@ sub vending_start {
 		debug ("Item added to Vender Store: $item->{name} - $item->{price} z\n", "vending", 2);
 
 		$display .= swrite(
-			"@< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<  @>>>>>  @>>>>>>>>>z",
+			"@< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< @<<<<<<<<<<<<<<  @>>>>  @>>>>>>>>>>>z",
 			[$articles, $item->{name}, $itemTypes_lut{$item->{type}}, $item->{quantity}, formatNumber($item->{price})]);
 	}
 	$display .= ('-'x79) . "\n";
@@ -6231,100 +6223,6 @@ sub boss_map_info {
 	}
 }
 
-# 02B1
-sub quest_all_list {
-	my ($self, $args) = @_;
-	$questList = {};
-	for (my $i = 8; $i < $args->{amount}*5+8; $i += 5) {
-		my ($questID, $active) = unpack('V C', substr($args->{RAW_MSG}, $i, 5));
-		$questList->{$questID}->{active} = $active;
-		debug "$questID $active\n", "info";
-	}
-}
-
-# 02B2
-# note: this packet shows all quests + their missions and has variable length
-sub quest_all_mission {
-	my ($self, $args) = @_;
-	debug $self->{packet_list}{$args->{switch}}->[0] . " " . join(', ', @{$args}{@{$self->{packet_list}{$args->{switch}}->[2]}}) ."\n";
-	for (my $i = 8; $i < $args->{amount}*104+8; $i += 104) {
-		my ($questID, $time_start, $time, $mission_amount) = unpack('V3 v', substr($args->{RAW_MSG}, $i, 14));
-		my $quest = \%{$questList->{$questID}};
-		$quest->{time_start} = $time_start;
-		$quest->{time} = $time;
-		debug "$questID $time_start $time $mission_amount\n", "info";
-		for (my $j = 0; $j < $mission_amount; $j++) {
-			my ($mobID, $count, $mobName) = unpack('V v Z24', substr($args->{RAW_MSG}, 14+$i+$j*30, 30));
-			my $mission = \%{$quest->{missions}->{$mobID}};
-			$mission->{mobID} = $mobID;
-			$mission->{count} = $count;
-			$mission->{mobName} = bytesToString($mobName);
-			debug "- $mobID $count $mobName\n", "info";
-		}
-	}
-}
-
-# 02B3
-# note: this packet shows all missions for 1 quest and has fixed length
-sub quest_add {
-	my ($self, $args) = @_;
-	my $questID = $args->{questID};
-	my $quest = \%{$questList->{$questID}};
-
-	unless (%$quest) {
-		message TF("Quest: %s has been added.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID), "info";
-	}
-
-	$quest->{time_start} = $args->{time_start};
-	$quest->{time} = $args->{time};
-	$quest->{active} = $args->{active};
-	debug $self->{packet_list}{$args->{switch}}->[0] . " " . join(', ', @{$args}{@{$self->{packet_list}{$args->{switch}}->[2]}}) ."\n";
-	for (my $i = 0; $i < $args->{amount}; $i++) {
-		my ($mobID, $count, $mobName) = unpack('V v Z24', substr($args->{RAW_MSG}, 17+$i*30, 30));
-		my $mission = \%{$quest->{missions}->{$mobID}};
-		$mission->{mobID} = $mobID;
-		$mission->{count} = $count;
-		$mission->{mobName} = bytesToString($mobName);
-		debug "- $mobID $count $mobName\n", "info";
-	}
-}
-
-# 02B4
-sub quest_delete {
-	my ($self, $args) = @_;
-	my $questID = $args->{questID};
-	message TF("Quest: %s has been deleted.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID), "info";
-	delete $questList->{$questID};
-}
-
-# 02B5
-# TODO: i'm not sure if the order here is the same as the order in quest_objective_update for the objectives, i sure do hope so
-# TODO: nvm previous todo, now we use
-# note: this packet updates the objectives counters
-sub quest_update_mission_hunt {
-	my ($self, $args) = @_;
-	for (my $i = 0; $i < $args->{amount}; $i++) {
-		my ($questID, $mobID, $count) = unpack('V2 v', substr($args->{RAW_MSG}, 6+$i*10, 10));
-		my $mission = \%{$questList->{$questID}->{missions}->{$mobID}};
-		$mission->{count} = $count;
-		$mission->{mobID} = $mobID;
-		debug sprintf ("questID (%d) - mob(%s) count(%d) \n", $questID, monsterName($mobID), $count), "info";
-	}
-}
-
-# 02B7
-sub quest_active {
-	my ($self, $args) = @_;
-	my $questID = $args->{questID};
-
-	message $args->{active}
-		? TF("Quest %s is now active.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID)
-		: TF("Quest %s is now inactive.\n", $quests_lut{$questID} ? "$quests_lut{$questID}{title} ($questID)" : $questID)
-	, "info";
-
-	$questList->{$args->{questID}}->{active} = $args->{active};
-}
-
 sub GM_req_acc_name {
 	my ($self, $args) = @_;
 	message TF("The accountName for ID %s is %s.\n", $args->{targetID}, $args->{accountName}), "info";
@@ -6446,6 +6344,7 @@ sub disconnect_character {
 sub character_block_info {
 	#TODO
 }
+
 1;
 
 =pod

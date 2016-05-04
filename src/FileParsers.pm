@@ -789,7 +789,7 @@ sub parseRODescLUT {
 	undef %{$r_hash};
 	my $ID;
 	my $IDdesc;
-	my $reader = Utils::TextReader->new($file);
+	my $reader = Utils::TextReader->new($file, { hide_comments => 0 });
 	until ($reader->eof) {
 		$_ = $reader->readLine;
 		s/\r//g;
@@ -838,7 +838,7 @@ sub parseROQuestsLUT {
 	
 	undef %{$r_hash};
 	my ($data, $flag);
-	my $reader = Utils::TextReader->new($file);
+	my $reader = Utils::TextReader->new($file, { hide_comments => 0 });
 	until ($reader->eof) {
 		$_ = $reader->readLine;
 		s/\r//g;
